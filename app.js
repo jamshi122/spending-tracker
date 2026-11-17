@@ -1,8 +1,24 @@
 // ============================================
-const BACKEND_URL = "YOUR_GOOGLE_APPS_SCRIPT_URL_HERE"; // ⚠️ PASTE YOUR URL HERE
-const SHEET_URL = "https://docs.google.com/spreadsheets/d/1syWFz8Gx_0yRmREAFBqyrSDCsladhzS5_-RmcIzvJbY/edit?gid=1251417057#gid=1251417057";         // ⚠️ PASTE YOUR URL HERE
+const BACKEND_URL = "https://script.google.com/macros/s/AKfycbxhJXudubUWPaHt62mcnx1yl0JpAWJOBv4dszwo6caBJPUiB-dTHzgdTXFCrhvAZC5m/exec"; // ⚠️ PASTE YOUR URL HERE
+const SHEET_URL = "https://docs.google.com/spreadsheets/d/1syWFz8Gx_0yRmREAFBqyrSDCsladhzS5_-RmcIzvJbY/edit?gid=1251417057#gid=1251417057"";         // ⚠️ PASTE YOUR URL HERE
 const CURRENCY = "QR";
 // ============================================
+
+// FALLBACK CATEGORIES (If Google Sheet fails to load them)
+const FALLBACK_CATS = [
+  {id:'1', name:'Fuel', type:'expense', icon:'⛽', parentId:''},
+  {id:'2', name:'Food & Dining', type:'expense', icon:'🍔', parentId:''},
+  {id:'3', name:'Transportation', type:'expense', icon:'🚗', parentId:''},
+  {id:'4', name:'Housing', type:'expense', icon:'🏠', parentId:''},
+  {id:'5', name:'Shopping', type:'expense', icon:'🛍️', parentId:''},
+  {id:'6', name:'Entertainment', type:'expense', icon:'🎬', parentId:''},
+  {id:'7', name:'Health', type:'expense', icon:'💊', parentId:''},
+  {id:'8', name:'Bills & Subs', type:'expense', icon:'📄', parentId:''},
+  {id:'9', name:'Other', type:'expense', icon:'📌', parentId:''},
+  {id:'10', name:'Salary', type:'income', icon:'💼', parentId:''},
+  {id:'11', name:'Business', type:'income', icon:'🏢', parentId:''},
+  {id:'12', name:'Other Income', type:'income', icon:'💵', parentId:''}
+];
 
 let state = {
   transactions: [], accounts: [], cards: [], payments: [],
@@ -40,7 +56,10 @@ async function fetchAll() {
       state.cards       = (json.data.CARD || []).map(normalizeCard);
       state.payments    = json.data.PAY || [];
       state.fuel        = (json.data.FUEL || []).map(normalizeFuel);
-      state.categories  = json.data.CAT || [];
+      
+      // SAFETY: If CAT is empty, use fallbacks
+      state.categories  = (json.data.CAT && json.data.CAT.length > 0) ? json.data.CAT : FALLBACK_CATS;
+      
       state.users       = json.data.USER || [];
       state.budgets     = json.data.BUDGET || [];
       setStatus(true);
@@ -254,7 +273,7 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-// ============ ADVANCED HISTORY (WEEK/MONTH GROUPING) ============
+// ============ ADVANCED HISTORY ============
 let historyFilter = { q: '', range: '30', type: 'all', group: 'none' };
 
 document.getElementById('btn-history')?.addEventListener('click', () => { switchView('history'); renderHistory(); });
@@ -454,9 +473,14 @@ function populateAddForm() {
 
 function populateCategories() {
   const type = document.getElementById('tx-type').value;
-  const parents = state.categories.filter(c => c.type === type && !c.parentId);
-  parents.sort((a,b) => (parseInt(a.sortOrder)||0) - (parseInt(b.sortOrder)||0));
-  document.getElementById('tx-category').innerHTML = parents.map(c => `<option value="${escapeHtml(c.name)}">${c.icon} ${c.name}</option>`).join('');
+  // SAFETY: Check if categories exist before filtering
+  const cats = state.categories && state.categories.length > 0 ? state.categories : FALLBACK_CATS;
+  const parents = cats.filter(c => c.type === type && !c.parentId);
+  
+  document.getElementById('tx-category').innerHTML = parents.length > 0 
+    ? parents.map(c => `<option value="${escapeHtml(c.name)}">${c.icon || '📌'} ${c.name}</option>`).join('')
+    : '<option value="">No categories found</option>';
+    
   updateSubcategories();
   updateFuelFieldVisibility();
 }
@@ -465,7 +489,10 @@ function updateSubcategories() {
   const parentName = document.getElementById('tx-category').value;
   const parent = state.categories.find(c => c.name === parentName && !c.parentId);
   const subs = parent ? state.categories.filter(c => c.parentId === parent.id) : [];
-  document.getElementById('tx-subcategory').innerHTML = '<option value="">— None —</option>' + subs.map(s => `<option value="${escapeHtml(s.name)}">${s.icon} ${s.name}</option>`).join('');
+  
+  document.getElementById('tx-subcategory').innerHTML = '<option value="">— None —</option>' + 
+    subs.map(s => `<option value="${escapeHtml(s.name)}">${s.icon || '📌'} ${s.name}</option>`).join('');
+  
   document.getElementById('fg-subcategory').classList.toggle('hidden', subs.length === 0);
 }
 
@@ -605,6 +632,71 @@ document.getElementById('btn-add-card').addEventListener('click', async () => {
   await fetchAll(); renderAccounts();
 });
 
+// ============ ADMIN PANEL LOGIC ============
+function renderAdminPanel() {
+  // Render Category List
+  const listEl = document.getElementById('admin-cat-list');
+  if (state.categories.length === 0) {
+    listEl.innerHTML = '<div class="hint">No categories found.</div>';
+  } else {
+    listEl.innerHTML = state.categories.map(c => `
+      <div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid #eee; font-size:12px;">
+        <span>${c.icon} ${c.name} (${c.type})</span>
+        ${c.parentId ? '' : '<span style="color:#8e8e93; font-size:10px;">Main</span>'}
+      </div>
+    `).join('');
+  }
+}
+
+document.getElementById('btn-admin-add-cat').addEventListener('click', async () => {
+  const type = prompt('Type (income or expense):', 'expense');
+  if (type !== 'income' && type !== 'expense') return alert('Must be income or expense');
+  
+  const name = prompt('Category Name (e.g. Pet Food):');
+  if (!name) return;
+  
+  const icon = prompt('Emoji Icon (e.g. 🐶):', '📌') || '📌';
+  
+  const parentName = prompt('Is this a subcategory? Type the Main Category name (or leave blank for Main):');
+  let parentId = '';
+  if (parentName) {
+    const parent = state.categories.find(c => c.name.toLowerCase() === parentName.toLowerCase());
+    if (parent) parentId = parent.id;
+    else return alert('Main category not found!');
+  }
+
+  await api('addCategory', { data: {
+    id: Date.now().toString(),
+    name: name,
+    type: type,
+    icon: icon,
+    parentId: parentId,
+    color: '#007AFF',
+    sortOrder: 99
+  }});
+  
+  await fetchAll();
+  renderAdminPanel();
+  populateCategories();
+  alert('Category added!');
+});
+
+document.getElementById('btn-admin-add-user').addEventListener('click', async () => {
+  const name = prompt('User Name (e.g. Son, Daughter):');
+  if (!name) return;
+  
+  await api('addUser', { data: {
+    id: Date.now().toString(),
+    name: name,
+    color: '#ff9500'
+  }});
+  
+  await fetchAll();
+  renderUserSwitcher();
+  alert('User added!');
+});
+
+// ============ BUDGETS & SETTINGS ============
 function renderDashboardBudgets() {
   const uid = state.currentUserId;
   const cutoff = dateOffset(-30);
@@ -646,6 +738,7 @@ function renderSettings() {
   document.getElementById('sheet-link').href = SHEET_URL;
   document.getElementById('info-count').innerText = `${state.transactions.length} transactions • ${state.accounts.length} accounts • ${state.cards.length} cards`;
   renderBudgetsSettings();
+  renderAdminPanel();
   
   document.getElementById('btn-export').onclick = () => {
     let csv = `Date,Type,Amount (${CURRENCY}),Category,Subcategory,Product,Note,User,Account,Card\n`;
@@ -654,9 +747,7 @@ function renderSettings() {
     const a = document.createElement('a'); a.href = url; a.download = `transactions-${new Date().toISOString().split('T')[0]}.csv`; a.click(); URL.revokeObjectURL(url);
   };
   document.getElementById('btn-sync').onclick = async () => { await fetchAll(); renderSettings(); alert('Synced!'); };
-  document.getElementById('btn-reset-cats').onclick = async () => { if (!confirm('Reload default categories?')) return; const res = await api('resetCategories'); if (res.success) { await fetchAll(); alert('Categories reloaded!'); } else alert('Failed: ' + res.error); };
   
-  // Progress Bar Update Logic
   document.getElementById('btn-check-update').onclick = () => {
     const overlay = document.getElementById('update-overlay');
     const bar = document.getElementById('update-progress');
@@ -669,9 +760,7 @@ function renderSettings() {
 
     const interval = setInterval(() => {
       progress += 5;
-      if (progress > 90) {
-        progress = 90; // Stop at 90% until reload
-      }
+      if (progress > 90) progress = 90; 
       bar.style.width = progress + '%';
       text.innerText = progress + '%';
       
@@ -680,7 +769,6 @@ function renderSettings() {
         setTimeout(() => {
           bar.style.width = '100%';
           text.innerText = '100%';
-          // Cache-busting reload
           window.location.href = window.location.pathname + '?update=' + Date.now();
         }, 300);
       }
