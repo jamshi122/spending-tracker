@@ -1,8 +1,8 @@
 // ============================================
 const BACKEND_URL = "https://script.google.com/macros/s/AKfycbxhJXudubUWPaHt62mcnx1yl0JpAWJOBv4dszwo6caBJPUiB-dTHzgdTXFCrhvAZC5m/exec"; // ⚠️ PASTE YOUR URL HERE
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/1syWFz8Gx_0yRmREAFBqyrSDCsladhzS5_-RmcIzvJbY/edit?gid=1251417057#gid=1251417057"";         // ⚠️ PASTE YOUR URL HERE
-const CURRENCY = "QR";
 // ============================================
+const CURRENCY = "QR";
 
 const FALLBACK_CATS = [
   {id:'1', name:'Fuel', type:'expense', icon:'⛽', parentId:''},
@@ -61,18 +61,25 @@ async function fetchAll() {
       setStatus(true);
       await seedFirstUserIfNeeded();
     }
-  } catch (e) { setStatus(false); console.error(e); }
+  } catch (e) { setStatus(false); console.error("Fetch Error:", e); }
 }
 
+// FIXED: Prevents the infinite freeze loop
+let isSeeding = false;
 async function seedFirstUserIfNeeded() {
+  if (isSeeding) return;
   if (state.users.length === 0) {
+    isSeeding = true;
     await api('addUser', { data: { id: 'u1', name: 'Husband', color: '#007aff' } });
     await api('addUser', { data: { id: 'u2', name: 'Wife', color: '#ff2d55' } });
+    isSeeding = false;
     await fetchAll(); return;
   }
   if (state.accounts.length === 0) {
+    isSeeding = true;
     await api('addAccount', { data: { id: 'acc1', name: 'Husband Bank', type: 'bank', owner: 'u1', balance: 0, currency: 'QAR' } });
     await api('addAccount', { data: { id: 'acc2', name: 'Wife Bank', type: 'bank', owner: 'u2', balance: 0, currency: 'QAR' } });
+    isSeeding = false;
     await fetchAll();
   }
 }
@@ -783,9 +790,17 @@ document.getElementById('user-switcher').addEventListener('change', (e) => {
 
 // ============ INIT ============
 async function init() {
-  await fetchAll();
+  // Renders UI instantly so it doesn't hang on a blank screen
   renderUserSwitcher();
   renderDashboard();
+  
+  // Fetches data in background
+  await fetchAll();
+  
+  // Re-renders with actual data
+  renderUserSwitcher();
+  renderDashboard();
+  
   setInterval(fetchAll, 60000);
 }
 init();
