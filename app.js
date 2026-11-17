@@ -1,6 +1,6 @@
 // ============================================
 const BACKEND_URL = "YOUR_GOOGLE_APPS_SCRIPT_URL_HERE"; // ⚠️ PASTE YOUR URL HERE
-const SHEET_URL = "YOUR_GOOGLE_SHEET_URL_HERE";         // ⚠️ PASTE YOUR URL HERE
+const SHEET_URL = "https://docs.google.com/spreadsheets/d/1syWFz8Gx_0yRmREAFBqyrSDCsladhzS5_-RmcIzvJbY/edit?gid=1251417057#gid=1251417057";         // ⚠️ PASTE YOUR URL HERE
 const CURRENCY = "QR";
 // ============================================
 
