@@ -169,3 +169,4 @@ body.dark .budget-bar { background: #2c2c2e; }
 body.dark .vstat { background: #2c2c2e; }
 body.dark .donut::after { background: #1c1c1e; }
 body.dark .progress-track { background: #2c2c2e; }
+body.dark #admin-cat-list { background: #2c2c2e; }
