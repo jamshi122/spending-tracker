@@ -14,9 +14,7 @@
   <header>
     <h1 id="page-title">Dashboard</h1>
     <div class="header-right">
-      <select id="user-switcher">
-        <option value="">Loading...</option>
-      </select>
+      <select id="user-switcher"><option>Loading...</option></select>
       <span id="status" class="status-dot">●</span>
     </div>
   </header>
@@ -25,93 +23,149 @@
   <main id="view-dashboard" class="view active">
     <div class="hero-card">
       <p>Net Worth</p>
-      <h2 id="dash-net">$0.00</h2>
+      <h2 id="dash-net">QR 0.00</h2>
       <div class="hero-sub">
-        <span>Cash: <b id="dash-cash">$0.00</b></span>
-        <span>Cards: <b id="dash-cards">$0.00</b></span>
+        <span>💵 Cash: <b id="dash-cash">QR 0.00</b></span>
+        <span>💳 Card debt: <b id="dash-cards">QR 0.00</b></span>
       </div>
     </div>
+
     <div class="kpi-row">
-      <div class="kpi income"><small>Income (30d)</small><b id="dash-income">$0</b></div>
-      <div class="kpi expense"><small>Expense (30d)</small><b id="dash-expense">$0</b></div>
-      <div class="kpi"><small>Fuel (L/100km)</small><b id="dash-fuel">—</b></div>
+      <div class="kpi income"><small>Income (30d)</small><b id="dash-income">QR 0</b></div>
+      <div class="kpi expense"><small>Expense (30d)</small><b id="dash-expense">QR 0</b></div>
+      <div class="kpi"><small>Saved (30d)</small><b id="dash-saved">QR 0</b></div>
     </div>
-    <h3>Accounts & Cards</h3>
-    <div id="dash-accounts" class="cards-scroll"></div>
-    <h3>Top Spending (30d)</h3>
+
+    <h3>Spending by Category (30d)</h3>
+    <div class="chart-card">
+      <div id="donut-chart" class="donut-wrap"></div>
+      <div id="donut-legend" class="donut-legend"></div>
+    </div>
+
+    <h3>Last 6 Months</h3>
+    <div class="chart-card">
+      <div id="monthly-chart" class="bar-chart"></div>
+      <div class="chart-legend">
+        <span><i style="background:#34c759"></i> Income</span>
+        <span><i style="background:#ff3b30"></i> Expense</span>
+      </div>
+    </div>
+
+    <h3>Budget Progress</h3>
+    <div id="dash-budgets" class="list"></div>
+
+    <h3>Top 5 Categories (30d)</h3>
     <div id="dash-top-cats" class="list"></div>
-    <h3>Recent</h3>
+
+    <h3>Fuel Efficiency</h3>
+    <div id="dash-fuel" class="list"></div>
+
+    <div class="section-head">
+      <h3>Recent Transactions</h3>
+      <button class="link-btn" id="btn-history">View All →</button>
+    </div>
     <div id="dash-recent" class="list"></div>
+  </main>
+
+  <!-- HISTORY (search/filter/edit/grouping) -->
+  <main id="view-history" class="view">
+    <input type="text" id="search-input" placeholder="🔍 Search transactions..." class="search-bar">
+    
+    <div class="filter-row">
+      <select id="filter-range">
+        <option value="30">Last 30 days</option>
+        <option value="90">Last 90 days</option>
+        <option value="365">Last year</option>
+        <option value="all">All time</option>
+      </select>
+      <select id="filter-type">
+        <option value="all">All types</option>
+        <option value="expense">Expenses</option>
+        <option value="income">Income</option>
+      </select>
+      <select id="group-by">
+        <option value="none">List View</option>
+        <option value="week">Group: Week</option>
+        <option value="month">Group: Month</option>
+      </select>
+    </div>
+
+    <div id="history-summary" class="history-summary">
+      <div class="hsum income">Income: <b>QR 0.00</b></div>
+      <div class="hsum expense">Expense: <b>QR 0.00</b></div>
+      <div class="hsum net">Net: <b>QR 0.00</b></div>
+    </div>
+
+    <div id="history-list" class="list"></div>
   </main>
 
   <!-- ADD -->
   <main id="view-add" class="view">
     <div class="tabs">
-      <button class="tab active" data-tab="expense">Expense</button>
-      <button class="tab" data-tab="income">Income</button>
-      <button class="tab" data-tab="fuel">Fuel</button>
-      <button class="tab" data-tab="payment">Pay Card</button>
+      <button class="tab active" data-type="expense">Expense</button>
+      <button class="tab" data-type="income">Income</button>
+      <button class="tab" data-type="payment">Pay Card</button>
     </div>
 
-    <!-- Expense/Income form -->
     <form id="form-tx" class="form">
       <input type="hidden" id="tx-type" value="expense">
-      <div class="fg"><label>Amount</label>
+      <input type="hidden" id="tx-edit-id" value="">
+
+      <div class="fg"><label>Amount (QR)</label>
         <input type="number" id="tx-amount" step="0.01" placeholder="0.00" required></div>
-      <div class="fg"><label>Category</label>
+
+      <div class="fg"><label>Main Category</label>
         <select id="tx-category" required></select></div>
-      <div class="fg"><label>Subcategory</label>
-        <select id="tx-subcategory"><option value="">—</option></select></div>
+
+      <div class="fg" id="fg-subcategory"><label>Subcategory</label>
+        <select id="tx-subcategory"></select></div>
+
+      <div id="fuel-fields" class="fuel-fields hidden">
+        <div class="fuel-header">⛽ Fuel Details</div>
+        <div class="fg"><label>Vehicle</label>
+          <input type="text" id="fuel-vehicle" placeholder="e.g. Camry"></div>
+        <div class="fg"><label>Odometer (km)</label>
+          <input type="number" id="fuel-odo" step="1" placeholder="e.g. 45230"></div>
+        <div class="fg"><label>Liters</label>
+          <input type="number" id="fuel-liters" step="0.01" placeholder="0.00"></div>
+        <div class="fg"><label>Price per Liter (QR)</label>
+          <input type="number" id="fuel-ppl" step="0.001" placeholder="0.000"></div>
+        <div class="fg"><label>Total (QR)</label>
+          <input type="number" id="fuel-total" step="0.01" readonly></div>
+        <div class="fg checkbox-fg"><label>
+          <input type="checkbox" id="fuel-full" checked> Full tank (needed for efficiency)
+        </label></div>
+      </div>
+
       <div class="fg"><label>Product / Service</label>
-        <input type="text" id="tx-product" placeholder="e.g. Pizza, Shampoo"></div>
-      <div class="fg"><label>Paid with</label>
+        <input type="text" id="tx-product" placeholder="Optional"></div>
+
+      <div class="fg"><label>Payment Method</label>
         <select id="tx-source">
-          <option value="account">💵 Account</option>
+          <option value="account">💵 Bank / Cash</option>
           <option value="card">💳 Credit Card</option>
         </select></div>
-      <div class="fg"><label>Which</label>
+
+      <div class="fg"><label>Which account / card</label>
         <select id="tx-source-id"></select></div>
+
       <div class="fg"><label>Note</label>
         <input type="text" id="tx-note" placeholder="Optional"></div>
+
       <div class="fg"><label>Date</label>
         <input type="date" id="tx-date" required></div>
+
       <button class="btn-primary" type="submit" id="btn-save-tx">Save</button>
+      <button class="btn-secondary hidden" type="button" id="btn-cancel-edit">Cancel Edit</button>
     </form>
 
-    <!-- Fuel form -->
-    <form id="form-fuel" class="form hidden">
-      <div class="fg"><label>Vehicle</label>
-        <input type="text" id="fuel-vehicle" placeholder="e.g. Camry" required></div>
-      <div class="fg"><label>Odometer (km)</label>
-        <input type="number" id="fuel-odo" step="1" required></div>
-      <div class="fg"><label>Liters</label>
-        <input type="number" id="fuel-liters" step="0.01" required></div>
-      <div class="fg"><label>Price per Liter</label>
-        <input type="number" id="fuel-ppl" step="0.001" required></div>
-      <div class="fg"><label>Total</label>
-        <input type="number" id="fuel-total" step="0.01" readonly></div>
-      <div class="fg"><label>Full tank?</label>
-        <input type="checkbox" id="fuel-full" checked></div>
-      <div class="fg"><label>Paid with</label>
-        <select id="fuel-source">
-          <option value="account">💵 Account</option>
-          <option value="card">💳 Credit Card</option>
-        </select></div>
-      <div class="fg"><label>Which</label>
-        <select id="fuel-source-id"></select></div>
-      <div class="fg"><label>Date</label>
-        <input type="date" id="fuel-date" required></div>
-      <button class="btn-primary" type="submit">Save Fuel Log</button>
-    </form>
-
-    <!-- Card payment form -->
     <form id="form-payment" class="form hidden">
-      <p class="hint">ℹ️ Paying a card bill is a TRANSFER, not an expense. Total spending stays the same.</p>
-      <div class="fg"><label>Pay card</label>
+      <p class="hint">ℹ️ Paying a card bill is a TRANSFER — not a new expense.</p>
+      <div class="fg"><label>Card to pay</label>
         <select id="pay-card" required></select></div>
       <div class="fg"><label>From account</label>
         <select id="pay-account" required></select></div>
-      <div class="fg"><label>Amount</label>
+      <div class="fg"><label>Amount (QR)</label>
         <input type="number" id="pay-amount" step="0.01" required></div>
       <div class="fg"><label>Note</label>
         <input type="text" id="pay-note" placeholder="Optional"></div>
@@ -123,55 +177,83 @@
 
   <!-- ACCOUNTS -->
   <main id="view-accounts" class="view">
-    <h3>Cash & Bank Accounts</h3>
+    <h3>💵 Cash & Bank Accounts</h3>
     <div id="accounts-list" class="list"></div>
     <button class="btn-secondary" id="btn-add-account">+ Add Account</button>
-    <h3 style="margin-top:24px">Credit Cards</h3>
+
+    <h3 style="margin-top:24px">💳 Credit Cards</h3>
+    <p class="hint">Cards for Husband and Wife. Add as many as you need.</p>
     <div id="cards-list" class="list"></div>
     <button class="btn-secondary" id="btn-add-card">+ Add Credit Card</button>
-  </main>
-
-  <!-- ANALYTICS -->
-  <main id="view-analytics" class="view">
-    <div class="tabs">
-      <button class="tab active" data-period="30">30d</button>
-      <button class="tab" data-period="90">90d</button>
-      <button class="tab" data-period="365">1y</button>
-    </div>
-    <h3>Spending by Category</h3>
-    <div id="chart-cats" class="chart-list"></div>
-    <h3>Top Products Spent</h3>
-    <div id="chart-products" class="list"></div>
-    <h3>Fuel Efficiency</h3>
-    <div id="chart-fuel" class="list"></div>
   </main>
 
   <!-- SETTINGS -->
   <main id="view-settings" class="view">
     <div class="box">
+      <h3>🔄 App Updates</h3>
+      <button id="btn-check-update" class="btn-primary" style="margin-top:0">Check for Updates</button>
+      <p class="hint">Tap here to reload the app if you uploaded new code.</p>
+    </div>
+
+    <div class="box">
+      <h3>🌙 Appearance</h3>
+      <label class="row-toggle">
+        <span>Dark Mode</span>
+        <input type="checkbox" id="toggle-dark">
+      </label>
+    </div>
+
+    <div class="box">
+      <h3>📊 Budgets</h3>
+      <p class="hint">Set a monthly limit per category. See progress on dashboard.</p>
+      <div id="budgets-list"></div>
+      <button id="btn-add-budget" class="btn-secondary">+ Set Budget</button>
+    </div>
+
+    <div class="box">
       <h3>📊 Google Sheet</h3>
       <a id="sheet-link" href="#" target="_blank" class="btn-secondary">Open Sheet ↗</a>
     </div>
+
     <div class="box">
-      <h3>💾 Download CSV</h3>
+      <h3>🏷️ Categories</h3>
+      <button id="btn-reset-cats" class="btn-secondary">Reload Default Categories</button>
+    </div>
+
+    <div class="box">
+      <h3>💾 Download</h3>
       <button id="btn-export" class="btn-secondary">Download Transactions CSV</button>
     </div>
+
     <div class="box">
-      <h3>🔄 Sync</h3>
-      <button id="btn-sync" class="btn-secondary">Force Sync from Google</button>
-      <p class="hint">Data lives in Google Sheets, not browser storage.</p>
+      <h3>🔄 Data Sync</h3>
+      <button id="btn-sync" class="btn-secondary">Force Sync from Sheet</button>
     </div>
+
     <div class="box">
       <h3>ℹ️ Info</h3>
-      <p id="info-count">0 transactions</p>
+      <p id="info-count" class="hint">0 transactions</p>
     </div>
   </main>
 
+  <!-- Edit Modal -->
+  <div id="edit-modal" class="modal hidden">
+    <div class="modal-content">
+      <h3>Transaction</h3>
+      <div id="edit-details"></div>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="edit-close">Close</button>
+        <button class="btn-primary" id="edit-delete" style="background:#ff3b30">Delete</button>
+        <button class="btn-primary" id="edit-open">Edit</button>
+      </div>
+    </div>
+  </div>
+
   <nav class="bottom-nav">
     <button class="nav-btn active" data-view="dashboard">🏠<span>Home</span></button>
+    <button class="nav-btn" data-view="history">🔍<span>History</span></button>
     <button class="nav-btn" data-view="add">➕<span>Add</span></button>
     <button class="nav-btn" data-view="accounts">💳<span>Accounts</span></button>
-    <button class="nav-btn" data-view="analytics">📊<span>Stats</span></button>
     <button class="nav-btn" data-view="settings">⚙️<span>More</span></button>
   </nav>
 </div>
