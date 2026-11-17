@@ -4,7 +4,6 @@ const SHEET_URL = "https://docs.google.com/spreadsheets/d/1syWFz8Gx_0yRmREAFBqyr
 const CURRENCY = "QR";
 // ============================================
 
-// FALLBACK CATEGORIES (If Google Sheet fails to load them)
 const FALLBACK_CATS = [
   {id:'1', name:'Fuel', type:'expense', icon:'⛽', parentId:''},
   {id:'2', name:'Food & Dining', type:'expense', icon:'🍔', parentId:''},
@@ -56,10 +55,7 @@ async function fetchAll() {
       state.cards       = (json.data.CARD || []).map(normalizeCard);
       state.payments    = json.data.PAY || [];
       state.fuel        = (json.data.FUEL || []).map(normalizeFuel);
-      
-      // SAFETY: If CAT is empty, use fallbacks
       state.categories  = (json.data.CAT && json.data.CAT.length > 0) ? json.data.CAT : FALLBACK_CATS;
-      
       state.users       = json.data.USER || [];
       state.budgets     = json.data.BUDGET || [];
       setStatus(true);
@@ -473,7 +469,6 @@ function populateAddForm() {
 
 function populateCategories() {
   const type = document.getElementById('tx-type').value;
-  // SAFETY: Check if categories exist before filtering
   const cats = state.categories && state.categories.length > 0 ? state.categories : FALLBACK_CATS;
   const parents = cats.filter(c => c.type === type && !c.parentId);
   
@@ -634,7 +629,6 @@ document.getElementById('btn-add-card').addEventListener('click', async () => {
 
 // ============ ADMIN PANEL LOGIC ============
 function renderAdminPanel() {
-  // Render Category List
   const listEl = document.getElementById('admin-cat-list');
   if (state.categories.length === 0) {
     listEl.innerHTML = '<div class="hint">No categories found.</div>';
