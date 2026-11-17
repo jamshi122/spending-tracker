@@ -1,0 +1,377 @@
+const SHEETS = {
+  TX: 'Transactions', ACC: 'Accounts', CARD: 'CreditCards',
+  PAY: 'CardPayments', FUEL: 'FuelLog', CAT: 'Categories', USER: 'Users'
+};
+const HEADERS = {
+  TX: ['id','date','type','amount','category','subcategory','product',
+       'note','accountId','cardId','userId','fuelId','createdAt'],
+  ACC: ['id','name','type','owner','balance','currency'],
+  CARD: ['id','name','last4','owner','limit','balance','dueDay','color'],
+  PAY: ['id','date','cardId','accountId','amount','note'],
+  FUEL: ['id','date','cardId','accountId','userId','vehicle',
+         'odometer','liters','pricePerLiter','total','fullTank','note'],
+  CAT: ['id','name','parentId','type','icon','color','sortOrder'],
+  USER: ['id','name','color']
+};
+
+function getOrCreateSheet(name, headers) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(name);
+  if (!sheet) { sheet = ss.insertSheet(name); sheet.appendRow(headers); sheet.setFrozenRows(1); }
+  return sheet;
+}
+
+function setupAllSheets() {
+  Object.keys(SHEETS).forEach(k => getOrCreateSheet(SHEETS[k], HEADERS[k]));
+  seedCategories();
+}
+
+function seedCategories() {
+  const sheet = getOrCreateSheet(SHEETS.CAT, HEADERS.CAT);
+  if (sheet.getLastRow() > 1) return;
+
+  // Format: [name, parentName, type, icon]
+  const data = [
+
+    // ==================== EXPENSE ====================
+
+    // FUEL (special — triggers odometer fields in the app)
+    ['Fuel','', 'expense','⛽'],
+    ['Petrol','Fuel','expense','⛽'],
+    ['Diesel','Fuel','expense','🛢️'],
+    ['Premium Fuel','Fuel','expense','🌟'],
+    ['Car Wash','Fuel','expense','🚿'],
+
+    // FOOD & DINING
+    ['Food & Dining','', 'expense','🍔'],
+    ['Groceries','Food & Dining','expense','🛒'],
+    ['Restaurants','Food & Dining','expense','🍽️'],
+    ['Coffee','Food & Dining','expense','☕'],
+    ['Delivery','Food & Dining','expense','🛵'],
+    ['Bakery','Food & Dining','expense','🥖'],
+    ['Snacks','Food & Dining','expense','🍿'],
+    ['Water','Food & Dining','expense','💧'],
+
+    // TRANSPORTATION
+    ['Transportation','', 'expense','🚗'],
+    ['Public Transit','Transportation','expense','🚇'],
+    ['Taxi / Uber / Careem','Transportation','expense','🚕'],
+    ['Parking','Transportation','expense','🅿️'],
+    ['Car Maintenance','Transportation','expense','🔧'],
+    ['Car Insurance','Transportation','expense','🛡️'],
+    ['Car Registration','Transportation','expense','📋'],
+    ['Traffic Fines','Transportation','expense','🚨'],
+    ['Salik / Tolls','Transportation','expense','🛣️'],
+
+    // HOUSING
+    ['Housing','', 'expense','🏠'],
+    ['Rent','Housing','expense','🔑'],
+    ['Electricity (Kahramaa)','Housing','expense','⚡'],
+    ['Water (Kahramaa)','Housing','expense','💧'],
+    ['Internet','Housing','expense','📶'],
+    ['Phone Bill','Housing','expense','📞'],
+    ['Maintenance','Housing','expense','🔨'],
+    ['Home Goods','Housing','expense','🛋️'],
+    ['Furniture','Housing','expense','🪑'],
+
+    // SHOPPING
+    ['Shopping','', 'expense','🛍️'],
+    ['Clothing','Shopping','expense','👕'],
+    ['Electronics','Shopping','expense','💻'],
+    ['Personal Care','Shopping','expense','💄'],
+    ['Books','Shopping','expense','📖'],
+    ['Gifts','Shopping','expense','🎁'],
+    ['Sports Equipment','Shopping','expense','⚽'],
+
+    // ENTERTAINMENT
+    ['Entertainment','', 'expense','🎬'],
+    ['Movies','Entertainment','expense','🎥'],
+    ['Streaming','Entertainment','expense','📺'],
+    ['Games','Entertainment','expense','🎮'],
+    ['Events','Entertainment','expense','🎟️'],
+    ['Hobbies','Entertainment','expense','🎨'],
+    ['Malls / Outings','Entertainment','expense','🏬'],
+
+    // HEALTH
+    ['Health','', 'expense','💊'],
+    ['Doctor','Health','expense','👨‍⚕️'],
+    ['Hospital','Health','expense','🏥'],
+    ['Pharmacy','Health','expense','💊'],
+    ['Dental','Health','expense','🦷'],
+    ['Health Insurance','Health','expense','🛡️'],
+    ['Gym / Fitness','Health','expense','💪'],
+
+    // EDUCATION
+    ['Education','', 'expense','📚'],
+    ['Tuition','Education','expense','🎓'],
+    ['Books & Supplies','Education','expense','📖'],
+    ['Courses','Education','expense','💻'],
+    ['School Fees','Education','expense','🏫'],
+
+    // KIDS
+    ['Kids','', 'expense','👶'],
+    ['Kids Clothing','Kids','expense','👕'],
+    ['Toys','Kids','expense','🧸'],
+    ['Kids Activities','Kids','expense','🎨'],
+    ['Babysitter','Kids','expense','👩‍🍼'],
+    ['Diapers / Formula','Kids','expense','🍼'],
+
+    // TRAVEL
+    ['Travel','', 'expense','✈️'],
+    ['Flights','Travel','expense','✈️'],
+    ['Hotels','Travel','expense','🏨'],
+    ['Visa / Passport','Travel','expense','🛂'],
+    ['Travel Activities','Travel','expense','🎢'],
+    ['Baggage','Travel','expense','🧳'],
+
+    // BILLS & SUBSCRIPTIONS
+    ['Bills & Subscriptions','', 'expense','📄'],
+    ['Electricity Bill','Bills & Subscriptions','expense','⚡'],
+    ['Water Bill','Bills & Subscriptions','expense','💧'],
+    ['Gas','Bills & Subscriptions','expense','🔥'],
+    ['Subscriptions','Bills & Subscriptions','expense','📱'],
+    ['Insurance','Bills & Subscriptions','expense','🛡️'],
+    ['Government Fees','Bills & Subscriptions','expense','🏛️'],
+
+    // DOMESTIC HELP (common in Qatar)
+    ['Domestic Help','', 'expense','🧹'],
+    ['Maid','Domestic Help','expense','🧹'],
+    ['Driver','Domestic Help','expense','🚗'],
+    ['Cook','Domestic Help','expense','👨‍🍳'],
+    ['Gardener','Domestic Help','expense','🌿'],
+
+    // CHARITY
+    ['Charity','', 'expense','❤️'],
+    ['Sadaqah','Charity','expense','🤲'],
+    ['Zakat','Charity','expense','🕌'],
+    ['Donations','Charity','expense','🎁'],
+
+    // PERSONAL CARE
+    ['Personal Care','', 'expense','💄'],
+    ['Haircut','Personal Care','expense','💇'],
+    ['Spa / Massage','Personal Care','expense','💆'],
+    ['Cosmetics','Personal Care','expense','💅'],
+
+    // OTHER
+    ['Other','', 'expense','📌'],
+    ['Miscellaneous','Other','expense','❓'],
+    ['Emergency','Other','expense','🚨'],
+    ['Bank Fees','Other','expense','🏦'],
+
+    // ==================== INCOME ====================
+
+    ['Salary','', 'income','💼'],
+    ['Base Salary','Salary','income','💵'],
+    ['Bonus','Salary','income','🎁'],
+    ['Overtime','Salary','income','⏰'],
+    ['End of Service','Salary','income','🏁'],
+
+    ['Business','', 'income','🏢'],
+    ['Sales','Business','income','💰'],
+    ['Consulting','Business','income','💼'],
+    ['Freelance','Business','income','💻'],
+
+    ['Investments','', 'income','📈'],
+    ['Dividends','Investments','income','📊'],
+    ['Interest','Investments','income','💹'],
+    ['Capital Gains','Investments','income','📈'],
+    ['Stocks','Investments','income','📉'],
+
+    ['Rental Income','', 'income','🏘️'],
+    ['Property Rent','Rental Income','income','🏠'],
+
+    ['Gifts','', 'income','🎁'],
+    ['Cash Gift','Gifts','income','💵'],
+    ['Inheritance','Gifts','income','📜'],
+
+    ['Refunds & Cashback','', 'income','↩️'],
+    ['Refund','Refunds & Cashback','income','↩️'],
+    ['Cashback','Refunds & Cashback','income','💳'],
+
+    ['Other Income','', 'income','💵']
+  ];
+
+  const idByName = {};
+  data.forEach((c, i) => {
+    const id = Utilities.getUuid();
+    idByName[c[0]] = id;
+    sheet.appendRow([id, c[0], '', c[2], c[3], '#007AFF', i]);
+  });
+  data.forEach((c, i) => {
+    if (c[1]) {
+      const parentId = idByName[c[1]];
+      if (parentId) sheet.getRange(i + 2, 3).setValue(parentId);
+    }
+  });
+}
+
+// ============ API ============
+function doPost(e) {
+  try {
+    const body = JSON.parse(e.postData.contents);
+    const action = body.action;
+    setupAllSheets();
+
+    if (action === 'addTx')           return addTx(body.data);
+    if (action === 'deleteTx')        return deleteRow(SHEETS.TX, body.id);
+    if (action === 'addCard')         return addRow(SHEETS.CARD, body.data, HEADERS.CARD);
+    if (action === 'addAccount')      return addRow(SHEETS.ACC, body.data, HEADERS.ACC);
+    if (action === 'addPayment')      return addPayment(body.data);
+    if (action === 'addFuel')         return addFuelTx(body.data);
+    if (action === 'addUser')         return addRow(SHEETS.USER, body.data, HEADERS.USER);
+    if (action === 'addCategory')     return addRow(SHEETS.CAT, body.data, HEADERS.CAT);
+    if (action === 'deleteCategory')  return deleteRow(SHEETS.CAT, body.id);
+    if (action === 'rebuildBalances') return rebuildBalances();
+    if (action === 'resetCategories') {
+      const s = getOrCreateSheet(SHEETS.CAT, HEADERS.CAT);
+      if (s.getLastRow() > 1) s.getRange(2, 1, s.getLastRow(), HEADERS.CAT.length).clearContent();
+      seedCategories();
+      return json({ success: true });
+    }
+    return json({ success: false, error: 'unknown action' });
+  } catch (err) {
+    return json({ success: false, error: err.toString() });
+  }
+}
+
+function doGet(e) {
+  try {
+    setupAllSheets();
+    const result = {};
+    Object.keys(SHEETS).forEach(k => {
+      const sheet = getOrCreateSheet(SHEETS[k], HEADERS[k]);
+      const data = sheet.getDataRange().getValues();
+      const headers = data[0];
+      result[k] = data.slice(1).map(row => {
+        const o = {};
+        headers.forEach((h, i) => o[h] = row[i]);
+        return o;
+      });
+    });
+    return json({ success: true, data: result });
+  } catch (err) {
+    return json({ success: false, error: err.toString() });
+  }
+}
+
+// ============ HELPERS ============
+function addRow(sheetName, data, headers) {
+  const sheet = getOrCreateSheet(sheetName, headers);
+  sheet.appendRow(headers.map(h => data[h] !== undefined ? data[h] : ''));
+  return json({ success: true });
+}
+
+function deleteRow(sheetName, id) {
+  const key = Object.keys(SHEETS).find(k => SHEETS[k] === sheetName);
+  const sheet = getOrCreateSheet(sheetName, HEADERS[key]);
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(id)) {
+      sheet.deleteRow(i + 1);
+      return json({ success: true });
+    }
+  }
+  return json({ success: false, error: 'not found' });
+}
+
+function adjustBalance(type, id, delta) {
+  if (!id) return;
+  const key = type === 'card' ? SHEETS.CARD : SHEETS.ACC;
+  const col = type === 'card' ? 6 : 5;
+  const sheet = getOrCreateSheet(key, HEADERS[type === 'card' ? 'CARD' : 'ACC']);
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(id)) {
+      const newBal = parseFloat(rows[i][col - 1] || 0) + delta;
+      sheet.getRange(i + 1, col).setValue(newBal);
+      return;
+    }
+  }
+}
+
+function addTx(data) {
+  const sheet = getOrCreateSheet(SHEETS.TX, HEADERS.TX);
+  sheet.appendRow([
+    data.id, data.date, data.type, data.amount,
+    data.category, data.subcategory || '', data.product || '',
+    data.note || '', data.accountId || '', data.cardId || '',
+    data.userId || '', data.fuelId || '', new Date().toISOString()
+  ]);
+  const amt = parseFloat(data.amount);
+  if (data.type === 'expense') {
+    if (data.cardId) adjustBalance('card', data.cardId, amt);
+    else if (data.accountId) adjustBalance('acc', data.accountId, -amt);
+  } else if (data.type === 'income') {
+    if (data.accountId) adjustBalance('acc', data.accountId, amt);
+  }
+  return json({ success: true });
+}
+
+function addFuelTx(data) {
+  const fuelId = data.id || Utilities.getUuid();
+  const fuelSheet = getOrCreateSheet(SHEETS.FUEL, HEADERS.FUEL);
+  fuelSheet.appendRow([
+    fuelId, data.date, data.cardId || '', data.accountId || '',
+    data.userId || '', data.vehicle, data.odometer, data.liters,
+    data.pricePerLiter, data.total, data.fullTank ? 'true' : 'false', data.note || ''
+  ]);
+  const txSheet = getOrCreateSheet(SHEETS.TX, HEADERS.TX);
+  txSheet.appendRow([
+    Utilities.getUuid(), data.date, 'expense', data.total,
+    'Fuel', data.vehicle, `⛽ ${data.liters}L @ QR ${data.pricePerLiter}`,
+    data.note || '', data.accountId || '', data.cardId || '',
+    data.userId || '', fuelId, new Date().toISOString()
+  ]);
+  const amt = parseFloat(data.total);
+  if (data.cardId) adjustBalance('card', data.cardId, amt);
+  else if (data.accountId) adjustBalance('acc', data.accountId, -amt);
+  return json({ success: true, id: fuelId });
+}
+
+function addPayment(data) {
+  const paySheet = getOrCreateSheet(SHEETS.PAY, HEADERS.PAY);
+  paySheet.appendRow([data.id, data.date, data.cardId, data.accountId, data.amount, data.note || '']);
+  adjustBalance('card', data.cardId, -parseFloat(data.amount));
+  if (data.accountId) adjustBalance('acc', data.accountId, -parseFloat(data.amount));
+  return json({ success: true });
+}
+
+function rebuildBalances() {
+  const cardSheet = getOrCreateSheet(SHEETS.CARD, HEADERS.CARD);
+  const accSheet  = getOrCreateSheet(SHEETS.ACC, HEADERS.ACC);
+  const txSheet   = getOrCreateSheet(SHEETS.TX, HEADERS.TX);
+  const paySheet  = getOrCreateSheet(SHEETS.PAY, HEADERS.PAY);
+  const cards = cardSheet.getDataRange().getValues();
+  for (let i = 1; i < cards.length; i++) cardSheet.getRange(i + 1, 6).setValue(0);
+  const accs = accSheet.getDataRange().getValues();
+  for (let i = 1; i < accs.length; i++) accSheet.getRange(i + 1, 5).setValue(0);
+  txSheet.getDataRange().getValues().slice(1).forEach(t => {
+    const amt = parseFloat(t[3] || 0);
+    if (t[2] === 'expense') {
+      if (t[9]) adjustBalance('card', t[9], amt);
+      else if (t[8]) adjustBalance('acc', t[8], -amt);
+    } else if (t[2] === 'income' && t[8]) adjustBalance('acc', t[8], amt);
+  });
+  paySheet.getDataRange().getValues().slice(1).forEach(p => {
+    adjustBalance('card', p[2], -parseFloat(p[4] || 0));
+    if (p[3]) adjustBalance('acc', p[3], -parseFloat(p[4] || 0));
+  });
+  return json({ success: true });
+}
+
+function json(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+// ==========================================
+// STANDALONE: Reload default categories
+// ==========================================
+function resetCategories() {
+  const s = getOrCreateSheet(SHEETS.CAT, HEADERS.CAT);
+  if (s.getLastRow() > 1) {
+    s.getRange(2, 1, s.getLastRow(), HEADERS.CAT.length).clearContent();
+  }
+  seedCategories();
+  SpreadsheetApp.getActive().toast('✅ Categories reset to defaults!');
+}
+
