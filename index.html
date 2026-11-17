@@ -187,12 +187,22 @@
     <button class="btn-secondary" id="btn-add-card">+ Add Credit Card</button>
   </main>
 
-  <!-- SETTINGS -->
+  <!-- SETTINGS / ADMIN -->
   <main id="view-settings" class="view">
+    <!-- ADMIN PANEL -->
+    <div class="box" style="border: 2px solid #007aff;">
+      <h3>🔐 Admin Panel</h3>
+      <p class="hint">Manage users and categories here.</p>
+      <div style="display:flex; gap:8px; margin-bottom:8px;">
+        <button id="btn-admin-add-user" class="btn-secondary" style="margin-top:0">+ User</button>
+        <button id="btn-admin-add-cat" class="btn-primary" style="margin-top:0; padding:11px">+ Category</button>
+      </div>
+      <div id="admin-cat-list" style="margin-top: 10px; max-height: 200px; overflow-y: auto; background: #f9f9f9; border-radius: 8px; padding: 8px;"></div>
+    </div>
+
     <div class="box">
       <h3>🔄 App Updates</h3>
       <button id="btn-check-update" class="btn-primary" style="margin-top:0">Check for Updates</button>
-      <p class="hint">Tap here to reload the app if you uploaded new code.</p>
     </div>
 
     <div class="box">
@@ -205,7 +215,6 @@
 
     <div class="box">
       <h3>📊 Budgets</h3>
-      <p class="hint">Set a monthly limit per category. See progress on dashboard.</p>
       <div id="budgets-list"></div>
       <button id="btn-add-budget" class="btn-secondary">+ Set Budget</button>
     </div>
@@ -213,11 +222,6 @@
     <div class="box">
       <h3>📊 Google Sheet</h3>
       <a id="sheet-link" href="#" target="_blank" class="btn-secondary">Open Sheet ↗</a>
-    </div>
-
-    <div class="box">
-      <h3>🏷️ Categories</h3>
-      <button id="btn-reset-cats" class="btn-secondary">Reload Default Categories</button>
     </div>
 
     <div class="box">
