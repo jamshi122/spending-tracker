@@ -1,8 +1,10 @@
 // ============================================
+// ⚠️ PASTE YOUR URLS HERE
+// ============================================
 const BACKEND_URL = "https://script.google.com/macros/s/AKfycbxhJXudubUWPaHt62mcnx1yl0JpAWJOBv4dszwo6caBJPUiB-dTHzgdTXFCrhvAZC5m/exec"; // ⚠️ PASTE YOUR URL HERE
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/1syWFz8Gx_0yRmREAFBqyrSDCsladhzS5_-RmcIzvJbY/edit?gid=1251417057#gid=1251417057"";         // ⚠️ PASTE YOUR URL HERE
-// ============================================
 const CURRENCY = "QR";
+// ============================================
 
 const FALLBACK_CATS = [
   {id:'1', name:'Fuel', type:'expense', icon:'⛽', parentId:''},
@@ -25,13 +27,11 @@ let state = {
   currentUserId: sessionStorage.getItem('currentUser') || ''
 };
 
-// ============ MONEY HELPER ============
 function money(n) {
   const v = parseFloat(n) || 0;
   return `${CURRENCY} ${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-// ============ API ============
 async function api(action, payload = {}) {
   try {
     const res = await fetch(BACKEND_URL, {
@@ -46,6 +46,7 @@ async function api(action, payload = {}) {
 }
 
 async function fetchAll() {
+  if (!BACKEND_URL || BACKEND_URL.includes("PASTE_YOUR")) return;
   try {
     const res = await fetch(BACKEND_URL);
     const json = await res.json();
@@ -59,29 +60,8 @@ async function fetchAll() {
       state.users       = json.data.USER || [];
       state.budgets     = json.data.BUDGET || [];
       setStatus(true);
-      await seedFirstUserIfNeeded();
     }
-  } catch (e) { setStatus(false); console.error("Fetch Error:", e); }
-}
-
-// FIXED: Prevents the infinite freeze loop
-let isSeeding = false;
-async function seedFirstUserIfNeeded() {
-  if (isSeeding) return;
-  if (state.users.length === 0) {
-    isSeeding = true;
-    await api('addUser', { data: { id: 'u1', name: 'Husband', color: '#007aff' } });
-    await api('addUser', { data: { id: 'u2', name: 'Wife', color: '#ff2d55' } });
-    isSeeding = false;
-    await fetchAll(); return;
-  }
-  if (state.accounts.length === 0) {
-    isSeeding = true;
-    await api('addAccount', { data: { id: 'acc1', name: 'Husband Bank', type: 'bank', owner: 'u1', balance: 0, currency: 'QAR' } });
-    await api('addAccount', { data: { id: 'acc2', name: 'Wife Bank', type: 'bank', owner: 'u2', balance: 0, currency: 'QAR' } });
-    isSeeding = false;
-    await fetchAll();
-  }
+  } catch (e) { setStatus(false); }
 }
 
 function setStatus(online) {
@@ -114,7 +94,6 @@ function normalizeDate(d) {
   return isNaN(date) ? new Date().toISOString().split('T')[0] : date.toISOString().split('T')[0];
 }
 
-// ============ NAV ============
 function switchView(name) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
@@ -132,7 +111,6 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
   btn.addEventListener('click', () => switchView(btn.dataset.view));
 });
 
-// ============ DASHBOARD ============
 function renderDashboard() {
   const uid = state.currentUserId;
   const filtUser = (arr) => uid ? arr.filter(x => x.userId === uid || !x.userId) : arr;
@@ -789,18 +767,35 @@ document.getElementById('user-switcher').addEventListener('change', (e) => {
 });
 
 // ============ INIT ============
+let hasSeeded = false;
+
 async function init() {
-  // Renders UI instantly so it doesn't hang on a blank screen
+  // 1. Render instantly so screen isn't blank
+  renderUserSwitcher();
+  renderDashboard();
+
+  // 2. Fetch data safely
+  try {
+    await fetchAll();
+
+    // 3. Seed data exactly once if the sheet is empty
+    if (state.users.length === 0 && !hasSeeded) {
+      hasSeeded = true;
+      await api('addUser', { data: { id: 'u1', name: 'Husband', color: '#007aff' } });
+      await api('addUser', { data: { id: 'u2', name: 'Wife', color: '#ff2d55' } });
+      await api('addAccount', { data: { id: 'acc1', name: 'Husband Bank', type: 'bank', owner: 'u1', balance: 0, currency: 'QAR' } });
+      await api('addAccount', { data: { id: 'acc2', name: 'Wife Bank', type: 'bank', owner: 'u2', balance: 0, currency: 'QAR' } });
+      await fetchAll(); // Fetch again to get the new data
+    }
+  } catch (err) {
+    console.error("Startup Error:", err);
+  }
+
+  // 4. Final render
   renderUserSwitcher();
   renderDashboard();
   
-  // Fetches data in background
-  await fetchAll();
-  
-  // Re-renders with actual data
-  renderUserSwitcher();
-  renderDashboard();
-  
+  // 5. Auto-sync
   setInterval(fetchAll, 60000);
 }
 init();
