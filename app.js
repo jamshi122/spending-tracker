@@ -141,7 +141,8 @@ function normalizeTx(t) {
     cardId: String(t.cardId || ''),
     userId: String(t.userId || ''),
     fuelId: String(t.fuelId || ''),
-    receiptUrl: t.receiptUrl || ''
+    receiptUrl: t.receiptUrl || '',
+    isPrivate: String(t.isPrivate) === 'true' || t.isPrivate === true
   };
 }
 function normalizeAcc(a) {
@@ -185,22 +186,27 @@ async function fetchAll() {
   } catch (e) { setStatus(false); return false; }
 }
 
-// ---------- Permissions filter ----------
+// ---------- Visibility filters ----------
+// Default: BOTH users see ALL transactions, cash and expenses.
+// Exception: a transaction marked isPrivate is only visible to its creator (and admin).
 function visibleTxs() {
-  if (isAdmin() && !state.currentUserId) return state.transactions; // Admin "Both"
-  if (isAdmin()) return state.transactions.filter(t => !state.currentUserId || t.userId === state.currentUserId || !t.userId);
-  // Regular user: only own transactions
-  return state.transactions.filter(t => t.userId === state.currentUserId);
+  const uid = state.currentUserId;
+  return state.transactions.filter(t => {
+    if (!t.isPrivate) return true;                    // public → everyone sees it
+    if (!uid) return true;                            // no profile selected → show all
+    if (String(t.userId) === String(uid)) return true; // owner always sees own private
+    if (isAdmin()) return true;                       // admin can see everything
+    return false;                                     // hide private txs of others
+  });
 }
 
+// Cash & cards: both users always see all balances (shared family view)
 function visibleAccounts() {
-  if (isAdmin()) return state.accounts;
-  return state.accounts.filter(a => a.owner === state.currentUserId);
+  return state.accounts;
 }
 
 function visibleCards() {
-  if (isAdmin()) return state.cards;
-  return state.cards.filter(c => c.owner === state.currentUserId);
+  return state.cards;
 }
 
 // ---------- Navigation ----------
@@ -353,13 +359,14 @@ function txRowHTML(t) {
   const source = t.cardId ? '💳' : t.accountId ? '💵' : '';
   const who = getUserName(t.userId);
   const receipt = t.receiptUrl ? ' 📎' : '';
+  const lock = t.isPrivate ? ' 🔒' : '';
   return `<div class="item" onclick="openEditModal('${t.id}')">
     <div class="item-icon">${icon}</div>
     <div class="item-info">
-      <div class="item-title">${escapeHtml(t.category || 'Other')}${receipt}</div>
+      <div class="item-title">${escapeHtml(t.category || 'Other')}${receipt}${lock}</div>
       ${sub ? `<div class="item-sub">${escapeHtml(sub)}</div>` : ''}
       <div class="item-sub">${t.date} ${source}</div>
-      <div class="item-user">👤 ${escapeHtml(who)}</div>
+      <div class="item-user">👤 ${escapeHtml(who)}${t.isPrivate ? ' · private' : ''}</div>
     </div>
     <div class="item-amt ${cls}">${sign}${money(t.amount)}</div>
   </div>`;
@@ -474,6 +481,8 @@ function openEditModal(id) {
   const sub = [tx.subcategory, tx.product].filter(Boolean).join(' • ');
   const who = getUserName(tx.userId);
   const canEdit = canEditTx(tx);
+  // Owner or admin can toggle privacy
+  const canTogglePrivacy = canEdit || isAdmin();
 
   document.getElementById('edit-details').innerHTML = `
     <div><b>${getCategoryIcon(tx.category)} ${escapeHtml(tx.category)}</b></div>
@@ -483,11 +492,48 @@ function openEditModal(id) {
     <div>👤 ${escapeHtml(who)}</div>
     ${tx.note ? `<div>📝 ${escapeHtml(tx.note)}</div>` : ''}
     ${tx.receiptUrl ? `<div style="margin-top:8px"><a href="${escapeHtml(tx.receiptUrl)}" target="_blank" class="link-btn">📎 View attached bill</a></div>` : ''}
+    <div style="margin-top:12px;padding:10px;background:${tx.isPrivate ? '#fff3cd' : '#e8f5e9'};border-radius:10px;font-size:13px;">
+      ${tx.isPrivate
+        ? '🔒 <b>Private</b> — only you (and Admin) can see this'
+        : '👁 <b>Visible to both</b> — family can see this'}
+    </div>
+    ${canTogglePrivacy ? `
+      <button type="button" class="btn-secondary" id="btn-toggle-privacy" style="margin-top:10px;border-color:${tx.isPrivate ? '#34c759' : '#ff9500'};color:${tx.isPrivate ? '#34c759' : '#ff9500'}">
+        ${tx.isPrivate ? '👁 Make visible to both' : '🔒 Hide from others (private)'}
+      </button>
+    ` : ''}
   `;
 
   document.getElementById('edit-delete').style.display = canEdit ? '' : 'none';
   document.getElementById('edit-open').style.display = canEdit ? '' : 'none';
   document.getElementById('edit-modal').classList.remove('hidden');
+
+  // Wire privacy toggle
+  const privacyBtn = document.getElementById('btn-toggle-privacy');
+  if (privacyBtn) {
+    privacyBtn.onclick = async () => {
+      const newPrivate = !tx.isPrivate;
+      showSaving(newPrivate ? 'Hiding from others…' : 'Making visible…');
+      const res = await api('updateTx', {
+        id: tx.id,
+        data: {
+          date: tx.date, type: tx.type, amount: tx.amount, category: tx.category,
+          subcategory: tx.subcategory, product: tx.product, note: tx.note,
+          accountId: tx.accountId, cardId: tx.cardId,
+          receiptUrl: tx.receiptUrl || '',
+          isPrivate: newPrivate
+        }
+      });
+      hideSaving();
+      if (!res.success) { toast('Failed: ' + (res.error || ''), 'error'); return; }
+      await fetchAll();
+      document.getElementById('edit-modal').classList.add('hidden');
+      editingId = null;
+      renderDashboard();
+      if (document.getElementById('view-history').classList.contains('active')) renderHistory();
+      toast(newPrivate ? 'Hidden from others 🔒' : 'Now visible to both 👁', 'success');
+    };
+  }
 }
 
 document.getElementById('edit-close').addEventListener('click', () => {
@@ -833,6 +879,7 @@ document.getElementById('form-tx').addEventListener('submit', async (e) => {
 
     if (editId) {
       const subVal = document.getElementById('tx-subcategory').value;
+      const existing = state.transactions.find(t => t.id === editId);
       const res = await api('updateTx', { id: editId, data: {
         date: document.getElementById('tx-date').value,
         type: document.getElementById('tx-type').value,
@@ -841,7 +888,8 @@ document.getElementById('form-tx').addEventListener('submit', async (e) => {
         note: document.getElementById('tx-note').value,
         accountId: sourceType === 'account' ? sourceId : '',
         cardId: sourceType === 'card' ? sourceId : '',
-        receiptUrl
+        receiptUrl,
+        isPrivate: existing ? existing.isPrivate : false
       }});
       if (!res.success) throw new Error(res.error || 'Update failed');
     } else if (isFuel) {
@@ -858,7 +906,8 @@ document.getElementById('form-tx').addEventListener('submit', async (e) => {
         accountId: sourceType === 'account' ? sourceId : '',
         userId: state.currentUserId,
         note: document.getElementById('tx-note').value,
-        receiptUrl
+        receiptUrl,
+        isPrivate: false
       }});
       if (!res.success) throw new Error(res.error || 'Save failed');
     } else {
@@ -874,7 +923,8 @@ document.getElementById('form-tx').addEventListener('submit', async (e) => {
         cardId: sourceType === 'card' ? sourceId : '',
         userId: state.currentUserId,
         fuelId: '',
-        receiptUrl
+        receiptUrl,
+        isPrivate: false
       }});
       if (!res.success) throw new Error(res.error || 'Save failed');
     }
