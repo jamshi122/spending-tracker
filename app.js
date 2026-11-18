@@ -126,6 +126,43 @@ function canManageAccount(ownerId) {
   return String(ownerId) === String(state.currentUserId);
 }
 
+// ---------- Local balance helpers (for optimistic UI) ----------
+function localAdjustBalance(type, id, delta) {
+  if (!id || !delta) return;
+  if (type === 'card') {
+    const c = state.cards.find(x => x.id === id);
+    if (c) c.balance = (parseFloat(c.balance) || 0) + delta;
+  } else {
+    const a = state.accounts.find(x => x.id === id);
+    if (a) a.balance = (parseFloat(a.balance) || 0) + delta;
+  }
+}
+
+function applyLocalTxEffect(tx, mult) {
+  // mult = +1 apply, -1 reverse
+  const amt = (parseFloat(tx.amount) || 0) * mult;
+  if (tx.type === 'expense') {
+    if (tx.cardId) localAdjustBalance('card', tx.cardId, amt);
+    else if (tx.accountId) localAdjustBalance('acc', tx.accountId, -amt);
+  } else if (tx.type === 'income' && tx.accountId) {
+    localAdjustBalance('acc', tx.accountId, amt);
+  }
+}
+
+function refreshCurrentView() {
+  if (document.getElementById('view-dashboard').classList.contains('active')) renderDashboard();
+  else if (document.getElementById('view-history').classList.contains('active')) renderHistory();
+  else if (document.getElementById('view-accounts').classList.contains('active')) renderAccounts();
+  else if (document.getElementById('view-settings').classList.contains('active')) renderSettings();
+}
+
+/** Soft background sync – does NOT block UI */
+function backgroundSync() {
+  fetchAll().then(ok => {
+    if (ok) refreshCurrentView();
+  }).catch(() => {});
+}
+
 // ---------- Normalization ----------
 function normalizeTx(t) {
   return {
@@ -233,9 +270,10 @@ function dateOffset(days) {
 }
 
 function renderDashboard() {
-  const txs = visibleTxs();
-  const accs = visibleAccounts();
-  const cards = visibleCards();
+  // ALWAYS show BOTH persons' data on the main dashboard (family totals)
+  const txs = state.transactions.filter(t => !t.isPrivate || String(t.userId) === String(state.currentUserId) || isAdmin());
+  const accs = state.accounts; // all cash
+  const cards = state.cards;   // all cards
   const cash = accs.reduce((s, a) => s + a.balance, 0);
   const debt = cards.reduce((s, c) => s + c.balance, 0);
   const net = cash - debt;
@@ -254,10 +292,12 @@ function renderDashboard() {
   document.getElementById('dash-saved').innerText = money(saved).replace('.00','');
 
   renderDonut(recent30.filter(t => t.type === 'expense'));
+  renderSpendingTrends(txs);
   renderMonthlyChart(txs);
   renderCashCardBar(recent30.filter(t => t.type === 'expense'));
   renderTopCategories(recent30.filter(t => t.type === 'expense'));
-  renderFuelSummary(state.fuel.filter(f => isAdmin() || f.userId === state.currentUserId));
+  renderTopSubcategories(recent30.filter(t => t.type === 'expense'));
+  renderFuelSummary(state.fuel); // both persons' fuel
   renderDashboardBudgets();
   renderRecent(txs);
 }
@@ -282,6 +322,129 @@ function renderDonut(expenses) {
   `).join('');
 }
 
+function monthKeyOffset(monthsBack) {
+  const d = new Date();
+  d.setDate(1);
+  d.setMonth(d.getMonth() - monthsBack);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function sumByMonth(txs, key, type) {
+  return txs.filter(t => t.date.startsWith(key) && t.type === type).reduce((s, t) => s + t.amount, 0);
+}
+
+function pctChange(current, previous) {
+  if (!previous || previous === 0) return current > 0 ? 100 : 0;
+  return ((current - previous) / previous) * 100;
+}
+
+function renderSpendingTrends(txs) {
+  const thisKey = monthKeyOffset(0);
+  const lastKey = monthKeyOffset(1);
+  const prevKey = monthKeyOffset(2);
+
+  const thisExp = sumByMonth(txs, thisKey, 'expense');
+  const lastExp = sumByMonth(txs, lastKey, 'expense');
+  const prevExp = sumByMonth(txs, prevKey, 'expense');
+  const thisInc = sumByMonth(txs, thisKey, 'income');
+  const lastInc = sumByMonth(txs, lastKey, 'income');
+
+  const dayOfMonth = new Date().getDate();
+  const daysInThisMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
+  const avgDailyThis = dayOfMonth > 0 ? thisExp / dayOfMonth : 0;
+  const avgDailyLast = lastExp / (new Date(new Date().getFullYear(), new Date().getMonth(), 0).getDate() || 30);
+  // Projected full-month spend at current pace
+  const projected = avgDailyThis * daysInThisMonth;
+
+  const expDelta = pctChange(thisExp, lastExp);
+  const incDelta = pctChange(thisInc, lastInc);
+  const avgDelta = pctChange(avgDailyThis, avgDailyLast);
+
+  const deltaClass = (p) => p > 3 ? 'up' : p < -3 ? 'down' : 'flat';
+  const deltaLabel = (p, invertGood) => {
+    const arrow = p > 3 ? '▲' : p < -3 ? '▼' : '●';
+    // For expenses, down is good (green); for income, up is good
+    let cls = deltaClass(p);
+    if (invertGood) {
+      if (cls === 'up') cls = 'up';
+      if (cls === 'down') cls = 'down';
+    }
+    return `<div class="trend-delta ${cls}">${arrow} ${Math.abs(p).toFixed(0)}% vs last month</div>`;
+  };
+
+  const cards = document.getElementById('trend-cards');
+  if (cards) {
+    cards.innerHTML = `
+      <div class="trend-card">
+        <small>This month spend</small>
+        <div class="trend-val expense" style="color:#ff3b30">${money(thisExp).replace('.00','')}</div>
+        ${deltaLabel(expDelta, true)}
+      </div>
+      <div class="trend-card">
+        <small>Last month spend</small>
+        <div class="trend-val">${money(lastExp).replace('.00','')}</div>
+        <div class="trend-delta flat">vs prior: ${pctChange(lastExp, prevExp) >= 0 ? '+' : ''}${pctChange(lastExp, prevExp).toFixed(0)}%</div>
+      </div>
+      <div class="trend-card">
+        <small>Avg / day (this month)</small>
+        <div class="trend-val">${money(avgDailyThis).replace('.00','')}</div>
+        ${deltaLabel(avgDelta, true)}
+      </div>
+      <div class="trend-card">
+        <small>Projected month-end</small>
+        <div class="trend-val">${money(projected).replace('.00','')}</div>
+        <div class="trend-delta flat">at current pace</div>
+      </div>
+    `;
+  }
+
+  // Category trends: this month vs last for top categories
+  const catThis = {}, catLast = {};
+  txs.filter(t => t.type === 'expense' && t.date.startsWith(thisKey)).forEach(t => {
+    catThis[t.category || 'Other'] = (catThis[t.category || 'Other'] || 0) + t.amount;
+  });
+  txs.filter(t => t.type === 'expense' && t.date.startsWith(lastKey)).forEach(t => {
+    catLast[t.category || 'Other'] = (catLast[t.category || 'Other'] || 0) + t.amount;
+  });
+  const allCats = [...new Set([...Object.keys(catThis), ...Object.keys(catLast)])];
+  const catDeltas = allCats.map(c => ({
+    name: c,
+    thisAmt: catThis[c] || 0,
+    lastAmt: catLast[c] || 0,
+    delta: (catThis[c] || 0) - (catLast[c] || 0)
+  })).filter(x => x.thisAmt > 0 || x.lastAmt > 0)
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+  const insights = [];
+  if (thisExp === 0 && lastExp === 0) {
+    insights.push('No spending data yet for trend analysis.');
+  } else {
+    if (expDelta > 10) insights.push(`Spending is up <b>${expDelta.toFixed(0)}%</b> vs last month.`);
+    else if (expDelta < -10) insights.push(`Spending is down <b>${Math.abs(expDelta).toFixed(0)}%</b> vs last month — good control.`);
+    else insights.push(`Spending is roughly stable vs last month (${expDelta >= 0 ? '+' : ''}${expDelta.toFixed(0)}%).`);
+
+    if (projected > lastExp * 1.15 && dayOfMonth >= 5) {
+      insights.push(`At this pace you may spend <b>${money(projected).replace('.00','')}</b> this month (above last month).`);
+    }
+
+    const risers = catDeltas.filter(c => c.delta > 0).slice(0, 2);
+    const fallers = catDeltas.filter(c => c.delta < 0).slice(0, 2);
+    risers.forEach(c => insights.push(`${getCategoryIcon(c.name)} <b>${escapeHtml(c.name)}</b> up ${money(c.delta).replace('.00','')} vs last month.`));
+    fallers.forEach(c => insights.push(`${getCategoryIcon(c.name)} <b>${escapeHtml(c.name)}</b> down ${money(Math.abs(c.delta)).replace('.00','')} vs last month.`));
+
+    if (thisInc > 0 || lastInc > 0) {
+      insights.push(`Income this month: <b>${money(thisInc).replace('.00','')}</b> (${incDelta >= 0 ? '+' : ''}${incDelta.toFixed(0)}% vs last).`);
+    }
+  }
+
+  const insEl = document.getElementById('trend-insights');
+  if (insEl) {
+    insEl.innerHTML = insights.length
+      ? `<ul style="margin:0;padding-left:18px">${insights.map(i => `<li>${i}</li>`).join('')}</ul>`
+      : '';
+  }
+}
+
 function renderMonthlyChart(txs) {
   const months = [];
   for (let i = 5; i >= 0; i--) {
@@ -295,7 +458,13 @@ function renderMonthlyChart(txs) {
   });
   const max = Math.max(1, ...data.map(d => Math.max(d.inc, d.exp)));
   document.getElementById('monthly-chart').innerHTML = data.map(d => `
-    <div class="bar-group"><div class="bar-pair"><div class="bar inc" style="height:${(d.inc/max)*100}%"></div><div class="bar exp" style="height:${(d.exp/max)*100}%"></div></div><div class="bar-label">${d.label}</div></div>
+    <div class="bar-group" title="Income ${money(d.inc)} · Expense ${money(d.exp)}">
+      <div class="bar-pair">
+        <div class="bar inc" style="height:${(d.inc/max)*100}%"></div>
+        <div class="bar exp" style="height:${(d.exp/max)*100}%"></div>
+      </div>
+      <div class="bar-label">${d.label}</div>
+    </div>
   `).join('');
 }
 
@@ -315,8 +484,34 @@ function renderTopCategories(expenses) {
   expenses.forEach(t => totals[t.category || 'Other'] = (totals[t.category || 'Other'] || 0) + t.amount);
   const sorted = Object.entries(totals).sort((a,b) => b[1]-a[1]).slice(0, 5);
   document.getElementById('dash-top-cats').innerHTML = sorted.length
-    ? sorted.map(([name, amt]) => `<div class="item"><div class="item-icon">${getCategoryIcon(name)}</div><div class="item-info"><div class="item-title">${name}</div></div><div class="item-amt expense">${money(amt)}</div></div>`).join('')
+    ? sorted.map(([name, amt]) => `<div class="item"><div class="item-icon">${getCategoryIcon(name)}</div><div class="item-info"><div class="item-title">${escapeHtml(name)}</div></div><div class="item-amt expense">${money(amt)}</div></div>`).join('')
     : '<div class="empty">No expenses yet</div>';
+}
+
+function renderTopSubcategories(expenses) {
+  const el = document.getElementById('dash-top-subs');
+  if (!el) return;
+  const totals = {};
+  expenses.forEach(t => {
+    const sub = (t.subcategory || '').trim();
+    if (!sub) return;
+    const key = `${t.category || 'Other'} › ${sub}`;
+    totals[key] = (totals[key] || 0) + t.amount;
+  });
+  const sorted = Object.entries(totals).sort((a,b) => b[1]-a[1]).slice(0, 8);
+  el.innerHTML = sorted.length
+    ? sorted.map(([name, amt]) => {
+        const [main, sub] = name.split(' › ');
+        return `<div class="item">
+          <div class="item-icon">${getCategoryIcon(main)}</div>
+          <div class="item-info">
+            <div class="item-title">${escapeHtml(sub)}</div>
+            <div class="item-sub">${escapeHtml(main)}</div>
+          </div>
+          <div class="item-amt expense">${money(amt)}</div>
+        </div>`;
+      }).join('')
+    : '<div class="empty">No subcategory spending yet — pick a subcategory when adding expenses</div>';
 }
 
 function renderFuelSummary(fuelLogs) {
@@ -381,15 +576,27 @@ function escapeHtml(s) {
 }
 
 // ---------- History ----------
-let historyFilter = { q: '', range: '30', type: 'all', group: 'none' };
+let historyFilter = { q: '', range: '30', type: 'all', category: 'all', group: 'none' };
 
 document.getElementById('btn-history')?.addEventListener('click', () => { switchView('history'); renderHistory(); });
 document.getElementById('search-input')?.addEventListener('input', (e) => { historyFilter.q = e.target.value.toLowerCase(); renderHistory(); });
 document.getElementById('filter-range')?.addEventListener('change', (e) => { historyFilter.range = e.target.value; renderHistory(); });
 document.getElementById('filter-type')?.addEventListener('change', (e) => { historyFilter.type = e.target.value; renderHistory(); });
+document.getElementById('filter-category')?.addEventListener('change', (e) => { historyFilter.category = e.target.value; renderHistory(); });
 document.getElementById('group-by')?.addEventListener('change', (e) => { historyFilter.group = e.target.value; renderHistory(); });
 
+function populateHistoryCategoryFilter() {
+  const sel = document.getElementById('filter-category');
+  if (!sel) return;
+  const cats = [...new Set(state.transactions.map(t => t.category).filter(Boolean))].sort();
+  const current = historyFilter.category || 'all';
+  sel.innerHTML = '<option value="all">All categories</option>' +
+    cats.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+  sel.value = current;
+}
+
 function renderHistory() {
+  populateHistoryCategoryFilter();
   let list = visibleTxs();
 
   if (historyFilter.range !== 'all') {
@@ -397,6 +604,9 @@ function renderHistory() {
     list = list.filter(t => t.date >= cutoff);
   }
   if (historyFilter.type !== 'all') list = list.filter(t => t.type === historyFilter.type);
+  if (historyFilter.category && historyFilter.category !== 'all') {
+    list = list.filter(t => t.category === historyFilter.category);
+  }
   if (historyFilter.q) {
     list = list.filter(t => (t.category + ' ' + t.subcategory + ' ' + t.product + ' ' + t.note + ' ' + getUserName(t.userId)).toLowerCase().includes(historyFilter.q));
   }
@@ -421,7 +631,14 @@ function renderHistory() {
     let key;
     if (historyFilter.group === 'month') {
       key = t.date.substring(0, 7);
+    } else if (historyFilter.group === 'category') {
+      key = t.category || 'Other';
+    } else if (historyFilter.group === 'subcategory') {
+      key = (t.subcategory || '').trim()
+        ? `${t.category || 'Other'} › ${t.subcategory}`
+        : `${t.category || 'Other'} › (no subcategory)`;
     } else {
+      // week
       const d = new Date(t.date + 'T12:00:00');
       const day = d.getDay() || 7;
       d.setDate(d.getDate() - day + 1);
@@ -435,7 +652,14 @@ function renderHistory() {
     if (t.date > groups[key].endDate) groups[key].endDate = t.date;
   });
 
-  const sortedKeys = Object.keys(groups).sort().reverse();
+  // Sort: for category/subcategory by expense desc; for dates reverse chrono
+  let sortedKeys = Object.keys(groups);
+  if (historyFilter.group === 'category' || historyFilter.group === 'subcategory') {
+    sortedKeys.sort((a, b) => groups[b].exp - groups[a].exp);
+  } else {
+    sortedKeys.sort().reverse();
+  }
+
   let html = '';
   sortedKeys.forEach(k => {
     const g = groups[k];
@@ -443,19 +667,22 @@ function renderHistory() {
     if (historyFilter.group === 'month') {
       const [y, m] = k.split('-');
       headerText = new Date(y, m - 1).toLocaleString('en', { month: 'long', year: 'numeric' });
+    } else if (historyFilter.group === 'category' || historyFilter.group === 'subcategory') {
+      headerText = k;
     } else {
       const s = new Date(g.startDate + 'T12:00:00').toLocaleDateString('en', { month: 'short', day: 'numeric' });
       const e = new Date(g.endDate + 'T12:00:00').toLocaleDateString('en', { month: 'short', day: 'numeric' });
       headerText = `Week of ${s} - ${e}`;
     }
-    html += `<div class="group-header" onclick="toggleGroup('${k}')">
-      <div class="group-title"><span>▼</span> ${headerText}</div>
+    const safeId = k.replace(/[^a-zA-Z0-9_-]/g, '_');
+    html += `<div class="group-header" onclick="toggleGroup('${safeId}')">
+      <div class="group-title"><span>▼</span> ${escapeHtml(headerText)}</div>
       <div class="group-totals">
         <span class="income">+${money(g.inc)}</span>
         <span class="expense">-${money(g.exp)}</span>
       </div>
     </div>`;
-    html += `<div class="group-body" id="group-${k}">`;
+    html += `<div class="group-body" id="group-${safeId}">`;
     html += g.items.map(historyRowHTML).join('');
     html += `</div>`;
   });
@@ -508,13 +735,21 @@ function openEditModal(id) {
   document.getElementById('edit-open').style.display = canEdit ? '' : 'none';
   document.getElementById('edit-modal').classList.remove('hidden');
 
-  // Wire privacy toggle
+  // Wire privacy toggle – optimistic
   const privacyBtn = document.getElementById('btn-toggle-privacy');
   if (privacyBtn) {
-    privacyBtn.onclick = async () => {
+    privacyBtn.onclick = () => {
       const newPrivate = !tx.isPrivate;
-      showSaving(newPrivate ? 'Hiding from others…' : 'Making visible…');
-      const res = await api('updateTx', {
+      const idx = state.transactions.findIndex(t => t.id === tx.id);
+      if (idx >= 0) state.transactions[idx].isPrivate = newPrivate;
+
+      document.getElementById('edit-modal').classList.add('hidden');
+      editingId = null;
+      refreshCurrentView();
+      toast(newPrivate ? 'Hidden from others 🔒' : 'Now visible to both 👁', 'success');
+
+      // Background save – no full refresh
+      api('updateTx', {
         id: tx.id,
         data: {
           date: tx.date, type: tx.type, amount: tx.amount, category: tx.category,
@@ -523,15 +758,14 @@ function openEditModal(id) {
           receiptUrl: tx.receiptUrl || '',
           isPrivate: newPrivate
         }
+      }).then(res => {
+        if (!res.success) {
+          // Revert
+          if (idx >= 0) state.transactions[idx].isPrivate = !newPrivate;
+          refreshCurrentView();
+          toast('Could not save privacy: ' + (res.error || ''), 'error');
+        }
       });
-      hideSaving();
-      if (!res.success) { toast('Failed: ' + (res.error || ''), 'error'); return; }
-      await fetchAll();
-      document.getElementById('edit-modal').classList.add('hidden');
-      editingId = null;
-      renderDashboard();
-      if (document.getElementById('view-history').classList.contains('active')) renderHistory();
-      toast(newPrivate ? 'Hidden from others 🔒' : 'Now visible to both 👁', 'success');
     };
   }
 }
@@ -541,7 +775,7 @@ document.getElementById('edit-close').addEventListener('click', () => {
   editingId = null;
 });
 
-document.getElementById('edit-delete').addEventListener('click', async () => {
+document.getElementById('edit-delete').addEventListener('click', () => {
   if (!editingId) return;
   const tx = state.transactions.find(t => t.id === editingId);
   if (!tx || !canEditTx(tx)) {
@@ -550,16 +784,31 @@ document.getElementById('edit-delete').addEventListener('click', async () => {
   }
   if (!confirm('Delete this transaction?')) return;
 
-  showSaving('Deleting…');
-  const res = await api('deleteTx', { id: editingId });
-  hideSaving();
-  if (!res.success) { toast('Failed: ' + res.error, 'error'); return; }
+  const id = editingId;
+  const snapshot = { ...tx };
+
+  // Optimistic: remove locally + reverse balance
+  state.transactions = state.transactions.filter(t => t.id !== id);
+  applyLocalTxEffect(snapshot, -1);
+  if (snapshot.fuelId) {
+    state.fuel = state.fuel.filter(f => f.id !== snapshot.fuelId);
+  }
+
   document.getElementById('edit-modal').classList.add('hidden');
   editingId = null;
-  await fetchAll();
-  renderDashboard();
-  if (document.getElementById('view-history').classList.contains('active')) renderHistory();
+  refreshCurrentView();
   toast('Deleted', 'success');
+
+  // Background delete
+  api('deleteTx', { id }).then(res => {
+    if (!res.success) {
+      // Restore
+      state.transactions.push(snapshot);
+      applyLocalTxEffect(snapshot, +1);
+      refreshCurrentView();
+      toast('Delete failed – restored: ' + (res.error || ''), 'error');
+    }
+  });
 });
 
 document.getElementById('edit-open').addEventListener('click', () => {
@@ -831,7 +1080,7 @@ function fileToBase64(file) {
   });
 }
 
-// ---------- Submit transaction ----------
+// ---------- Submit transaction (OPTIMISTIC) ----------
 document.getElementById('form-tx').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (!state.currentUserId) {
@@ -850,7 +1099,6 @@ document.getElementById('form-tx').addEventListener('submit', async (e) => {
   const sourceId = document.getElementById('tx-source-id').value;
   if (!sourceId) { toast('Add an account or card first', 'error'); return; }
 
-  // Permission: when editing, must own it
   if (editId) {
     const existing = state.transactions.find(t => t.id === editId);
     if (existing && !canEditTx(existing)) {
@@ -861,117 +1109,186 @@ document.getElementById('form-tx').addEventListener('submit', async (e) => {
 
   const btn = document.getElementById('btn-save-tx');
   setButtonLoading(btn, true);
-  showSaving(editId ? 'Updating…' : 'Saving…', 'Uploading data to Google Sheet');
 
-  try {
-    // 1. Upload receipt if present
-    let receiptUrl = state.existingReceiptUrl || '';
-    if (state.receiptFile) {
-      showSaving('Uploading bill…', 'Please wait');
-      const { base64, mimeType, name } = await fileToBase64(state.receiptFile);
-      const up = await api('uploadReceipt', { data: { base64, mimeType, name } });
-      if (!up.success) throw new Error(up.error || 'Upload failed');
-      receiptUrl = up.url || '';
+  const subVal = document.getElementById('tx-subcategory').value;
+  const dateVal = document.getElementById('tx-date').value;
+  const typeVal = document.getElementById('tx-type').value;
+  const productVal = document.getElementById('tx-product').value;
+  const noteVal = document.getElementById('tx-note').value;
+  const accountId = sourceType === 'account' ? sourceId : '';
+  const cardId = sourceType === 'card' ? sourceId : '';
+  const receiptFile = state.receiptFile; // capture before reset
+  let receiptUrl = state.existingReceiptUrl || '';
+
+  // ---- OPTIMISTIC local update first ----
+  let localTx = null;
+  let oldTxSnapshot = null;
+  let fuelPayload = null;
+
+  if (editId) {
+    const idx = state.transactions.findIndex(t => t.id === editId);
+    if (idx >= 0) {
+      oldTxSnapshot = { ...state.transactions[idx] };
+      applyLocalTxEffect(oldTxSnapshot, -1); // reverse old effect
+      localTx = {
+        ...oldTxSnapshot,
+        date: dateVal, type: typeVal, amount, category,
+        subcategory: subVal, product: productVal, note: noteVal,
+        accountId, cardId, receiptUrl
+      };
+      state.transactions[idx] = localTx;
+      applyLocalTxEffect(localTx, +1);
     }
+  } else {
+    const newId = Date.now().toString();
+    localTx = {
+      id: newId, date: dateVal, type: typeVal, amount, category,
+      subcategory: isFuel ? (document.getElementById('fuel-vehicle').value.trim() || '') : subVal,
+      product: isFuel ? `⛽ ${document.getElementById('fuel-liters').value}L` : productVal,
+      note: noteVal, accountId, cardId,
+      userId: state.currentUserId, fuelId: isFuel ? newId : '',
+      receiptUrl, isPrivate: false
+    };
+    state.transactions.unshift(localTx);
+    applyLocalTxEffect(localTx, +1);
 
-    // 2. Save transaction
-    showSaving(editId ? 'Updating transaction…' : 'Saving transaction…');
-
-    if (editId) {
-      const subVal = document.getElementById('tx-subcategory').value;
-      const existing = state.transactions.find(t => t.id === editId);
-      const res = await api('updateTx', { id: editId, data: {
-        date: document.getElementById('tx-date').value,
-        type: document.getElementById('tx-type').value,
-        amount, category, subcategory: subVal,
-        product: document.getElementById('tx-product').value,
-        note: document.getElementById('tx-note').value,
-        accountId: sourceType === 'account' ? sourceId : '',
-        cardId: sourceType === 'card' ? sourceId : '',
-        receiptUrl,
-        isPrivate: existing ? existing.isPrivate : false
-      }});
-      if (!res.success) throw new Error(res.error || 'Update failed');
-    } else if (isFuel) {
-      const res = await api('addFuel', { data: {
-        id: Date.now().toString(),
-        date: document.getElementById('tx-date').value,
+    if (isFuel) {
+      fuelPayload = {
+        id: newId, date: dateVal,
         vehicle: document.getElementById('fuel-vehicle').value.trim(),
-        odometer: parseFloat(document.getElementById('fuel-odo').value),
-        liters: parseFloat(document.getElementById('fuel-liters').value),
-        pricePerLiter: parseFloat(document.getElementById('fuel-ppl').value),
+        odometer: parseFloat(document.getElementById('fuel-odo').value) || 0,
+        liters: parseFloat(document.getElementById('fuel-liters').value) || 0,
+        pricePerLiter: parseFloat(document.getElementById('fuel-ppl').value) || 0,
         total: amount,
         fullTank: document.getElementById('fuel-full').checked,
-        cardId: sourceType === 'card' ? sourceId : '',
-        accountId: sourceType === 'account' ? sourceId : '',
-        userId: state.currentUserId,
-        note: document.getElementById('tx-note').value,
-        receiptUrl,
-        isPrivate: false
-      }});
-      if (!res.success) throw new Error(res.error || 'Save failed');
-    } else {
-      const subVal = document.getElementById('tx-subcategory').value;
-      const res = await api('addTx', { data: {
-        id: Date.now().toString(),
-        date: document.getElementById('tx-date').value,
-        type: document.getElementById('tx-type').value,
-        amount, category, subcategory: subVal,
-        product: document.getElementById('tx-product').value,
-        note: document.getElementById('tx-note').value,
-        accountId: sourceType === 'account' ? sourceId : '',
-        cardId: sourceType === 'card' ? sourceId : '',
-        userId: state.currentUserId,
-        fuelId: '',
-        receiptUrl,
-        isPrivate: false
-      }});
-      if (!res.success) throw new Error(res.error || 'Save failed');
+        cardId, accountId, userId: state.currentUserId,
+        note: noteVal, receiptUrl, isPrivate: false
+      };
+      state.fuel.push({
+        id: newId, date: dateVal, vehicle: fuelPayload.vehicle,
+        odometer: fuelPayload.odometer, liters: fuelPayload.liters,
+        pricePerLiter: fuelPayload.pricePerLiter, total: amount,
+        cardId, accountId, userId: state.currentUserId,
+        fullTank: fuelPayload.fullTank
+      });
     }
-
-    await fetchAll();
-    resetAddForm();
-    switchView('dashboard');
-    toast('Saved successfully', 'success');
-  } catch (err) {
-    toast(String(err.message || err), 'error');
-  } finally {
-    setButtonLoading(btn, false);
-    hideSaving();
   }
+
+  // Instant UI feedback
+  resetAddForm();
+  switchView('dashboard');
+  toast(editId ? 'Updated ✓' : 'Saved ✓', 'success');
+  setButtonLoading(btn, false);
+
+  // Notify if this expense category is over budget
+  if (typeVal === 'expense' || isFuel) {
+    const catName = isFuel ? 'Fuel' : category;
+    const budget = (state.budgets || []).find(b => b.category === catName);
+    if (budget) {
+      const spent = getBudgetSpent(catName);
+      const limit = parseFloat(budget.amount) || 0;
+      if (limit > 0 && spent >= limit) {
+        setTimeout(() => toast(`⚠️ ${catName} budget exceeded: ${money(spent)} / ${money(limit)}`, 'error'), 600);
+      } else if (limit > 0 && spent / limit >= 0.8) {
+        setTimeout(() => toast(`⚡ ${catName}: ${Math.round(spent / limit * 100)}% of budget used`, 'info'), 600);
+      }
+    }
+  }
+
+  // ---- Background: receipt upload (if any) then API ----
+  (async () => {
+    try {
+      if (receiptFile) {
+        const { base64, mimeType, name } = await fileToBase64(receiptFile);
+        const up = await api('uploadReceipt', { data: { base64, mimeType, name } });
+        if (up.success && up.url) {
+          receiptUrl = up.url;
+          // patch local
+          const t = state.transactions.find(x => x.id === localTx.id);
+          if (t) t.receiptUrl = receiptUrl;
+        }
+      }
+
+      let res;
+      if (editId) {
+        res = await api('updateTx', { id: editId, data: {
+          date: dateVal, type: typeVal, amount, category, subcategory: subVal,
+          product: productVal, note: noteVal, accountId, cardId,
+          receiptUrl, isPrivate: localTx ? localTx.isPrivate : false
+        }});
+      } else if (isFuel && fuelPayload) {
+        fuelPayload.receiptUrl = receiptUrl;
+        res = await api('addFuel', { data: fuelPayload });
+      } else {
+        res = await api('addTx', { data: {
+          id: localTx.id, date: dateVal, type: typeVal, amount, category,
+          subcategory: subVal, product: productVal, note: noteVal,
+          accountId, cardId, userId: state.currentUserId, fuelId: '',
+          receiptUrl, isPrivate: false
+        }});
+      }
+
+      if (!res.success) throw new Error(res.error || 'Save failed');
+      // Optional light sync later – not blocking
+    } catch (err) {
+      // Revert optimistic change
+      if (editId && oldTxSnapshot) {
+        const idx = state.transactions.findIndex(t => t.id === editId);
+        if (idx >= 0) {
+          applyLocalTxEffect(state.transactions[idx], -1);
+          state.transactions[idx] = oldTxSnapshot;
+          applyLocalTxEffect(oldTxSnapshot, +1);
+        }
+      } else if (localTx) {
+        applyLocalTxEffect(localTx, -1);
+        state.transactions = state.transactions.filter(t => t.id !== localTx.id);
+        if (isFuel) state.fuel = state.fuel.filter(f => f.id !== localTx.id);
+      }
+      refreshCurrentView();
+      toast('Save failed – reverted: ' + (err.message || err), 'error');
+      // Recover truth from server
+      backgroundSync();
+    }
+  })();
 });
 
-// ---------- Payment form ----------
-document.getElementById('form-payment').addEventListener('submit', async (e) => {
+// ---------- Payment form (OPTIMISTIC) ----------
+document.getElementById('form-payment').addEventListener('submit', (e) => {
   e.preventDefault();
   if (!state.currentUserId) { toast('Select your profile first', 'error'); return; }
 
   const btn = document.getElementById('btn-save-payment');
-  setButtonLoading(btn, true);
-  showSaving('Recording payment…');
+  const payId = Date.now().toString();
+  const cardId = document.getElementById('pay-card').value;
+  const accountId = document.getElementById('pay-account').value;
+  const amount = parseFloat(document.getElementById('pay-amount').value);
+  const note = document.getElementById('pay-note').value;
+  const date = document.getElementById('pay-date').value;
 
-  try {
-    const res = await api('addPayment', { data: {
-      id: Date.now().toString(),
-      date: document.getElementById('pay-date').value,
-      cardId: document.getElementById('pay-card').value,
-      accountId: document.getElementById('pay-account').value,
-      amount: parseFloat(document.getElementById('pay-amount').value),
-      note: document.getElementById('pay-note').value,
-      userId: state.currentUserId
-    }});
-    if (!res.success) throw new Error(res.error || 'Failed');
-    await fetchAll();
-    document.getElementById('form-payment').reset();
-    document.getElementById('pay-date').value = new Date().toISOString().split('T')[0];
-    switchView('dashboard');
-    toast('Payment recorded', 'success');
-  } catch (err) {
-    toast(String(err.message || err), 'error');
-  } finally {
-    setButtonLoading(btn, false);
-    hideSaving();
-  }
+  if (!amount || amount <= 0) { toast('Enter valid amount', 'error'); return; }
+
+  // Optimistic balance change
+  localAdjustBalance('card', cardId, -amount);
+  if (accountId) localAdjustBalance('acc', accountId, -amount);
+
+  setButtonLoading(btn, true);
+  document.getElementById('form-payment').reset();
+  document.getElementById('pay-date').value = new Date().toISOString().split('T')[0];
+  switchView('dashboard');
+  toast('Payment recorded ✓', 'success');
+  setButtonLoading(btn, false);
+
+  api('addPayment', { data: {
+    id: payId, date, cardId, accountId, amount, note, userId: state.currentUserId
+  }}).then(res => {
+    if (!res.success) {
+      localAdjustBalance('card', cardId, +amount);
+      if (accountId) localAdjustBalance('acc', accountId, +amount);
+      refreshCurrentView();
+      toast('Payment failed – reverted: ' + (res.error || ''), 'error');
+      backgroundSync();
+    }
+  });
 });
 
 // ---------- Accounts ----------
@@ -1083,46 +1400,150 @@ document.getElementById('btn-admin-add-user').addEventListener('click', async ()
 });
 
 // ---------- Budgets ----------
+function getBudgetSpent(category, days = 30) {
+  const cutoff = dateOffset(-days);
+  // Both persons' spending against family budgets
+  return state.transactions
+    .filter(t => t.type === 'expense' && t.date >= cutoff && t.category === category)
+    .reduce((s, t) => s + t.amount, 0);
+}
+
 function renderDashboardBudgets() {
-  const cutoff = dateOffset(-30);
-  const uid = state.currentUserId;
-  const uid_txs = visibleTxs().filter(t => t.date >= cutoff && t.type === 'expense');
   const budgets = state.budgets || [];
+  const alertEl = document.getElementById('budget-alerts');
+
   if (budgets.length === 0) {
     document.getElementById('dash-budgets').innerHTML = '<div class="empty">No budgets set yet. Go to More → Budgets.</div>';
+    if (alertEl) alertEl.classList.add('hidden');
     return;
   }
-  document.getElementById('dash-budgets').innerHTML = budgets.map(b => {
-    const spent = uid_txs.filter(t => t.category === b.category).reduce((s,t) => s + t.amount, 0);
-    const pct = Math.min(100, (spent / b.amount) * 100);
-    const cls = spent >= b.amount ? 'over' : pct >= 80 ? 'warn' : 'ok';
-    return `<div class="budget-row"><div class="budget-head"><span>${getCategoryIcon(b.category)} ${escapeHtml(b.category)}</span><span>${money(spent)} / ${money(b.amount)}</span></div><div class="budget-bar"><div class="budget-fill ${cls}" style="width:${pct}%"></div></div></div>`;
-  }).join('');
+
+  const rows = [];
+  const alerts = [];
+
+  budgets.forEach(b => {
+    const spent = getBudgetSpent(b.category);
+    const limit = parseFloat(b.amount) || 0;
+    const pct = limit > 0 ? Math.min(100, (spent / limit) * 100) : 0;
+    const cls = spent >= limit ? 'over' : pct >= 80 ? 'warn' : 'ok';
+    rows.push(`<div class="budget-row"><div class="budget-head"><span>${getCategoryIcon(b.category)} ${escapeHtml(b.category)}</span><span>${money(spent)} / ${money(limit)}</span></div><div class="budget-bar"><div class="budget-fill ${cls}" style="width:${pct}%"></div></div></div>`);
+
+    if (spent >= limit && limit > 0) {
+      alerts.push(`⚠️ <b>${escapeHtml(b.category)}</b> over budget: ${money(spent)} / ${money(limit)}`);
+    } else if (pct >= 80 && limit > 0) {
+      alerts.push(`⚡ <b>${escapeHtml(b.category)}</b> nearly full: ${pct.toFixed(0)}% used`);
+    }
+  });
+
+  document.getElementById('dash-budgets').innerHTML = rows.join('');
+
+  if (alertEl) {
+    if (alerts.length) {
+      alertEl.innerHTML = '<b>Budget alerts</b><br>' + alerts.map(a => `<div>${a}</div>`).join('');
+      alertEl.classList.remove('hidden');
+      alertEl.classList.toggle('over', alerts.some(a => a.includes('over budget')));
+    } else {
+      alertEl.classList.add('hidden');
+    }
+  }
+}
+
+function populateBudgetCategorySelect() {
+  const sel = document.getElementById('budget-cat-select');
+  if (!sel) return;
+  const parents = (state.categories || []).filter(c => c.type === 'expense' && !c.parentId);
+  const list = parents.length ? parents : FALLBACK_CATS.filter(c => c.type === 'expense');
+  sel.innerHTML = '<option value="">— Select category —</option>' +
+    list.map(c => `<option value="${escapeHtml(c.name)}">${c.icon || '📌'} ${escapeHtml(c.name)}</option>`).join('');
 }
 
 function renderBudgetsSettings() {
+  populateBudgetCategorySelect();
   const budgets = state.budgets || [];
   document.getElementById('budgets-list').innerHTML = budgets.length
-    ? budgets.map(b => `<div class="budget-row"><div class="budget-head"><span>${getCategoryIcon(b.category)} ${escapeHtml(b.category)}</span><span>${money(b.amount)}/mo</span></div><button class="link-btn" onclick="deleteBudget('${b.id}')" style="color:#ff3b30">Remove</button></div>`).join('')
-    : '<p class="hint">No budgets yet.</p>';
+    ? budgets.map(b => {
+        const spent = getBudgetSpent(b.category);
+        const over = spent >= (parseFloat(b.amount) || 0);
+        return `<div class="budget-row">
+          <div class="budget-head">
+            <span>${getCategoryIcon(b.category)} ${escapeHtml(b.category)}${over ? ' ⚠️' : ''}</span>
+            <span>${money(b.amount)}/mo · spent ${money(spent)}</span>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:6px;">
+            <button class="link-btn" onclick="editBudgetAmount('${b.id}','${escapeHtml(b.category)}',${parseFloat(b.amount)||0})">Edit amount</button>
+            <button class="link-btn" onclick="deleteBudget('${b.id}')" style="color:#ff3b30">Remove</button>
+          </div>
+        </div>`;
+      }).join('')
+    : '<p class="hint">No budgets yet. Choose a category below.</p>';
 }
+
 window.deleteBudget = async (id) => {
   if (!confirm('Remove budget?')) return;
-  showSaving('Removing…');
-  await api('deleteBudget', { id });
-  await fetchAll();
-  hideSaving();
+  state.budgets = (state.budgets || []).filter(b => b.id !== id);
   renderBudgetsSettings();
+  renderDashboardBudgets();
+  toast('Budget removed', 'success');
+  api('deleteBudget', { id }).then(res => {
+    if (!res.success) backgroundSync();
+  });
 };
 
-document.getElementById('btn-add-budget').addEventListener('click', async () => {
-  const cat = prompt('Category name (e.g. Fuel):'); if (!cat) return;
-  const amt = parseFloat(prompt('Monthly budget in QR:')); if (!amt) return;
-  showSaving('Saving budget…');
-  await api('saveBudget', { data: { category: cat, amount: amt, period: 'monthly', userId: state.currentUserId || '' }});
-  await fetchAll();
-  hideSaving();
+window.editBudgetAmount = async (id, category, currentAmt) => {
+  const raw = prompt(`New monthly budget for ${category} (QR):`, String(currentAmt));
+  if (raw === null) return;
+  const amt = parseFloat(raw);
+  if (!amt || amt <= 0) { toast('Enter a valid amount', 'error'); return; }
+
+  const b = (state.budgets || []).find(x => x.id === id);
+  if (b) b.amount = amt;
   renderBudgetsSettings();
+  renderDashboardBudgets();
+  toast('Budget updated ✓', 'success');
+
+  api('saveBudget', { data: { id, category, amount: amt, period: 'monthly', userId: '' } }).then(res => {
+    if (!res.success) {
+      toast('Could not save budget: ' + (res.error || ''), 'error');
+      backgroundSync();
+    }
+  });
+};
+
+document.getElementById('btn-add-budget').addEventListener('click', () => {
+  const cat = document.getElementById('budget-cat-select').value;
+  const amt = parseFloat(document.getElementById('budget-amount-input').value);
+  if (!cat) { toast('Select a category', 'error'); return; }
+  if (!amt || amt <= 0) { toast('Enter a valid monthly amount', 'error'); return; }
+
+  const existing = (state.budgets || []).find(b => b.category === cat);
+  if (existing) {
+    existing.amount = amt;
+  } else {
+    const id = Date.now().toString();
+    state.budgets = state.budgets || [];
+    state.budgets.push({ id, category: cat, amount: amt, period: 'monthly', userId: '' });
+  }
+
+  document.getElementById('budget-amount-input').value = '';
+  renderBudgetsSettings();
+  renderDashboardBudgets();
+  toast('Budget saved ✓', 'success');
+
+  api('saveBudget', { data: { category: cat, amount: amt, period: 'monthly', userId: '' } }).then(res => {
+    if (!res.success) {
+      toast('Could not save: ' + (res.error || ''), 'error');
+      backgroundSync();
+    } else {
+      backgroundSync(); // pick up server id if any
+    }
+  });
+});
+
+// ---------- Print ----------
+document.getElementById('btn-print')?.addEventListener('click', () => {
+  // Ensure dashboard is showing family totals, then print
+  switchView('dashboard');
+  setTimeout(() => window.print(), 200);
 });
 
 // ---------- Dark mode ----------
@@ -1161,10 +1582,10 @@ function renderSettings() {
 
   document.getElementById('btn-sync').onclick = async () => {
     showSaving('Syncing…');
-    await fetchAll();
+    const ok = await fetchAll();
     hideSaving();
-    renderSettings();
-    toast('Synced!', 'success');
+    refreshCurrentView();
+    toast(ok ? 'Synced!' : 'Sync failed – check connection', ok ? 'success' : 'error');
   };
 
   document.getElementById('btn-check-update').onclick = () => {
@@ -1315,11 +1736,8 @@ async function init() {
     renderDashboard();
   } catch (err) { console.error(err); }
 
-  // Auto-sync every 60s
-  setInterval(async () => {
-    await fetchAll();
-    if (document.getElementById('view-dashboard').classList.contains('active')) renderDashboard();
-  }, 60000);
+  // Soft background sync every 3 minutes (non-blocking)
+  setInterval(() => { backgroundSync(); }, 180000);
 }
 
 init();

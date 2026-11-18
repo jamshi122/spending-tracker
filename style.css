@@ -11,6 +11,36 @@ header h1 { font-size: 22px; margin: 0; flex: 1; }
 .status-dot { font-size: 14px; color: #34c759; }
 .status-dot.offline { color: #ff9500; }
 .user-badge { font-size: 12px; background: #e5e5ea; padding: 4px 10px; border-radius: 20px; font-weight: 600; white-space: nowrap; }
+.icon-btn { background: none; border: none; font-size: 20px; cursor: pointer; padding: 4px 6px; line-height: 1; }
+.budget-alerts { background: #fff3cd; border: 1px solid #ffc107; border-radius: 12px; padding: 12px 14px; margin-bottom: 14px; font-size: 13px; color: #856404; }
+.budget-alerts.over { background: #fde8e8; border-color: #ff3b30; color: #9b1c1c; }
+.budget-alerts div { margin: 4px 0; }
+body.dark .budget-alerts { background: #3a3000; border-color: #b8860b; color: #ffe08a; }
+body.dark .budget-alerts.over { background: #3a1515; border-color: #ff3b30; color: #ffb4b4; }
+
+.trend-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+.trend-card { background: white; border-radius: 12px; padding: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+.trend-card small { font-size: 10px; color: #8e8e93; display: block; margin-bottom: 4px; }
+.trend-card .trend-val { font-size: 16px; font-weight: 700; }
+.trend-card .trend-delta { font-size: 12px; margin-top: 4px; font-weight: 600; }
+.trend-delta.up { color: #ff3b30; }
+.trend-delta.down { color: #34c759; }
+.trend-delta.flat { color: #8e8e93; }
+.trend-insights { margin-top: 12px; font-size: 12px; color: #3a3a3c; line-height: 1.5; }
+.trend-insights li { margin: 4px 0; }
+body.dark .trend-card { background: #1c1c1e; }
+body.dark .trend-insights { color: #ebebf5; }
+
+@media print {
+  body { background: white !important; color: black !important; padding: 0; }
+  .bottom-nav, .header-right, #login-gate, .update-overlay, #saving-overlay,
+  #edit-modal, .toast, #btn-print, .tabs, .filter-row, .search-bar { display: none !important; }
+  .app { max-width: 100%; padding: 12px; }
+  .view { display: none !important; }
+  #view-dashboard.view.active, #view-dashboard { display: block !important; }
+  .hero-card { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .list, .chart-card, .kpi, .box { box-shadow: none; border: 1px solid #ddd; }
+}
 
 .view { display: none; }
 .view.active { display: block; animation: fadeIn 0.15s ease; }

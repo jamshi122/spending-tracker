@@ -38,6 +38,7 @@
       <h1 id="page-title">Dashboard</h1>
     </div>
     <div class="header-right">
+      <button type="button" id="btn-print" class="icon-btn" title="Print summary">🖨️</button>
       <select id="user-switcher" class="hidden"><option>Loading...</option></select>
       <span id="current-user-badge" class="user-badge"></span>
       <span id="status" class="status-dot" title="Connection">●</span>
@@ -73,20 +74,29 @@
     <h3>Cash vs Card (30d)</h3>
     <div id="cashcard-bar" class="cashcard-bar"></div>
 
-    <h3>Last 6 Months</h3>
+    <h3>Spending Trends</h3>
+    <div id="trend-cards" class="trend-cards"></div>
     <div class="chart-card">
+      <div class="section-head" style="margin:0 0 8px">
+        <h3 style="margin:0;font-size:14px">Last 6 Months</h3>
+      </div>
       <div id="monthly-chart" class="bar-chart"></div>
       <div class="chart-legend">
         <span><i style="background:#34c759"></i> Income</span>
         <span><i style="background:#ff3b30"></i> Expense</span>
       </div>
+      <div id="trend-insights" class="trend-insights"></div>
     </div>
 
-    <h3>Budget Progress</h3>
+    <div id="budget-alerts" class="budget-alerts hidden"></div>
+    <h3>Budget Progress (Both)</h3>
     <div id="dash-budgets" class="list"></div>
 
     <h3>Top 5 Categories (30d)</h3>
     <div id="dash-top-cats" class="list"></div>
+
+    <h3>Top Subcategories (30d)</h3>
+    <div id="dash-top-subs" class="list"></div>
 
     <h3>Fuel Efficiency</h3>
     <div id="dash-fuel" class="list"></div>
@@ -114,10 +124,15 @@
         <option value="expense">Expenses</option>
         <option value="income">Income</option>
       </select>
+      <select id="filter-category">
+        <option value="all">All categories</option>
+      </select>
       <select id="group-by">
         <option value="none">List View</option>
         <option value="week">Group: Week</option>
         <option value="month">Group: Month</option>
+        <option value="category">Group: Category</option>
+        <option value="subcategory">Group: Subcategory</option>
       </select>
     </div>
 
@@ -279,8 +294,13 @@
 
     <div class="box">
       <h3>📊 Budgets</h3>
+      <p class="hint">Select a category and set monthly limit. You’ll be notified when spending exceeds the budget.</p>
       <div id="budgets-list"></div>
-      <button id="btn-add-budget" class="btn-secondary">+ Set Budget</button>
+      <div class="budget-form" style="margin-top:12px;display:flex;flex-direction:column;gap:8px;">
+        <select id="budget-cat-select"></select>
+        <input type="number" id="budget-amount-input" step="1" min="0" placeholder="Monthly limit (QR)" inputmode="decimal">
+        <button id="btn-add-budget" class="btn-secondary" style="margin-top:0">Save Budget</button>
+      </div>
     </div>
 
     <!-- Google Sheet – ADMIN ONLY -->
