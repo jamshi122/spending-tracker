@@ -7,7 +7,7 @@ const GOOGLE_CLIENT_ID = '686310480898-0aqo8gm4l53djgml96l5hirpq8vl4o90.apps.goo
 const CURRENCY = 'QR';
 
 const state = {
-  accessToken: null, user: null,
+  accessToken: null, tokenExpiry: 0, tokenClient: null, user: null,
   transactions: [], accounts: [], cards: [], payments: [], fuel: [],
   categories: [], users: [], budgets: [], version: null, busy: false,
   editId: null, receipt: null
@@ -31,13 +31,37 @@ function isAdmin() { return state.user?.role === 'admin'; }
 function userName(id) { return state.users.find(u=>String(u.id)===String(id))?.name || '—'; }
 function canEdit(tx) { return isAdmin() || String(tx.userId)===String(state.user?.id); }
 
-function showGate(message='Sign in with your registered email and password.') {
+function showGate(message='Sign in with an approved Google account to continue.') {
   $('login-gate').classList.remove('hidden'); $('app-shell').classList.add('hidden');
   $('login-message').textContent=message;
 }
 function showApp() { $('login-gate').classList.add('hidden'); $('app-shell').classList.remove('hidden'); }
 
+function initGoogleIdentity() {
+  if (!window.google?.accounts?.oauth2) { $('login-message').textContent='Google sign-in is loading. Refresh this page in a moment.'; return; }
+  state.tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: GOOGLE_CLIENT_ID,
+    scope: 'openid email profile',
+    callback: async response => {
+      if (response.error || !response.access_token) { showGate('Google sign-in was not completed. Please try again.'); return; }
+      state.accessToken=response.access_token;
+      state.tokenExpiry=Date.now()+(Number(response.expires_in||3600)-60)*1000;
+      await loadData(true);
+    }
+  });
+}
+function signIn() {
+  if (!state.tokenClient) initGoogleIdentity();
+  if (!state.tokenClient) { toast('Google sign-in is not ready. Refresh the page.','error'); return; }
+  state.tokenClient.requestAccessToken({prompt:'consent'});
+}
+function ensureToken() {
+  if (state.accessToken && Date.now()<state.tokenExpiry) return true;
+  state.accessToken=null; showGate('Your sign-in session expired. Please sign in again.'); return false;
+}
+
 async function api(action, payload={}) {
+  if (!ensureToken()) throw new Error('Please sign in again.');
   const response = await fetch(BACKEND_URL, {
     method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'},
     body:JSON.stringify({action,accessToken:state.accessToken,...payload})
@@ -46,35 +70,6 @@ async function api(action, payload={}) {
   if (result.authRequired) { state.accessToken=null; showGate(result.error||'Please sign in again.'); throw new Error(result.error||'Authentication required.'); }
   if (!result.success) throw new Error(result.error||'Request failed.');
   setStatus(true); return result;
-}
-
-async function signIn(ev) {
-  ev?.preventDefault();
-  const email=$('login-email').value.trim().toLowerCase();
-  const password=$('login-password').value;
-  if(!email||!password) return toast('Enter your email and password.','error');
-  try {
-    setBusy(true,'Signing in…');
-    const r=await api('login',{email,password});
-    state.accessToken=r.sessionToken;
-    if(r.mustChangePassword){ $('password-change').classList.remove('hidden'); $('login-form').classList.add('hidden'); $('request-form').classList.add('hidden'); $('login-message').textContent='For security, create a new password before continuing.'; }
-    else await loadData(true);
-  } catch(e){toast(e.message,'error');} finally{setBusy(false);}
-}
-async function submitPasswordChange(ev){
-  ev.preventDefault();
-  const password=$('new-password').value, confirmPassword=$('confirm-password').value;
-  if(password.length<10) return toast('Use at least 10 characters for your new password.','error');
-  if(password!==confirmPassword) return toast('Passwords do not match.','error');
-  try{setBusy(true,'Updating password…');await api('changePassword',{newPassword:password});$('password-change').classList.add('hidden');$('login-form').classList.remove('hidden');await loadData(true);toast('Password updated.','success');}
-  catch(e){toast(e.message,'error');}finally{setBusy(false);}
-}
-async function requestAccess(ev){
-  ev.preventDefault();
-  const name=$('request-name').value.trim(), email=$('request-email').value.trim().toLowerCase();
-  if(!name||!email) return toast('Enter your name and email.','error');
-  try{setBusy(true,'Sending access request…');await api('requestAccess',{name,email});$('request-form').reset();toast('Request sent. The administrator will review it.','success');}
-  catch(e){toast(e.message,'error');}finally{setBusy(false);}
 }
 function normalizeTx(x) { return {...x,id:String(x.id),amount:num(x.amount),userId:String(x.userId||''),accountId:String(x.accountId||''),cardId:String(x.cardId||''),isPrivate:x.isPrivate===true||String(x.isPrivate)==='true'||String(x.isPrivate)==='1'}; }
 function normalizeAccount(x) { return {...x,id:String(x.id),balance:num(x.balance)}; }
@@ -135,7 +130,7 @@ function renderBudgets() {
 }
 function renderAdmin() {
   if(!isAdmin()) return;
-  $('users-list').innerHTML=state.users.map(u=>{const pending=String(u.status||'ACTIVE').toUpperCase()==='PENDING';return `<div class="summary-row"><span>${esc(u.name)} <small>${esc(u.email||'')} · ${esc(u.role||'user')} · ${esc(u.status||'ACTIVE')}</small></span><span><button class="small-btn" data-temp-user="${esc(u.id)}">${pending?'Approve & set password':'Set temporary password'}</button>${pending?` <button class="small-btn" data-reject-user="${esc(u.id)}">Reject</button>`:''}</span></div>`;}).join('');
+  $('users-list').innerHTML=state.users.map(u=>`<div class="summary-row"><span>${esc(u.name)} <small>${esc(u.role)}</small></span><b>${esc(u.id)}</b></div>`).join('');
   $('categories-list').innerHTML=state.categories.map(c=>`<div class="summary-row"><span>${esc(c.icon||'•')} ${esc(c.name)}</span><small>${esc(c.type||'expense')}</small></div>`).join('');
 }
 
@@ -203,22 +198,10 @@ async function saveBudget() {
   try{await api('saveBudget',{data});await loadData(true);$('budget-amount').value='';toast('Budget saved.','success');}catch(e){toast(e.message,'error');}
 }
 async function addUser() {
-  const name=prompt('User name:'); if(!name) return;
-  const email=prompt('User email:'); if(!email) return;
-  try{await api('addUser',{data:{name,email,role:'user'}});await loadData(true);toast('User created. Set a temporary password from the user list.','success');}
-  catch(e){toast(e.message,'error');}
-}
-async function setTemporaryPassword(id){
-  const user=state.users.find(u=>String(u.id)===String(id)); if(!user)return;
-  const password=prompt(`Temporary password for ${user.name} (minimum 10 characters):`); if(!password)return;
-  if(password.length<10)return toast('Use at least 10 characters.','error');
-  try{await api('setTemporaryPassword',{id,password});await loadData(true);toast('Temporary password set. Share it with the user privately.','success');}
-  catch(e){toast(e.message,'error');}
-}
-async function rejectAccessRequest(id){
-  if(!confirm('Reject this access request?'))return;
-  try{await api('rejectAccessRequest',{id});await loadData(true);toast('Access request rejected.','success');}
-  catch(e){toast(e.message,'error');}
+  const name=prompt('New user name:'); if(!name) return;
+  const email=prompt('Google account email to authorize:'); if(!email) return;
+  const role=(prompt('Role: admin or user','user')||'user').toLowerCase();
+  try{await api('addUser',{data:{name,email,role}});await loadData(true);toast('User added. Add them as an OAuth test user in Google Cloud if not already added.','success');}catch(e){toast(e.message,'error');}
 }
 async function addCategory() {
   const name=prompt('Category name:'); if(!name) return;
@@ -230,13 +213,10 @@ function exportCsv() {
   const lines=[cols.join(','),...state.transactions.map(t=>cols.map(k=>'"'+String(t[k]??'').replace(/"/g,'""')+'"').join(','))];
   const blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='jamshi-transactions.csv';a.click();URL.revokeObjectURL(url);
 }
-function signOut() { state.accessToken=null;state.user=null;state.version=null;$('login-password').value='';showGate('You have signed out. Sign in to continue.'); }
+function signOut() { state.accessToken=null;state.user=null;state.version=null;showGate('You have signed out. Sign in to continue.'); }
 
 function bindEvents() {
-  $('login-form').addEventListener('submit',signIn);
-  $('password-change').addEventListener('submit',submitPasswordChange);
-  $('request-form').addEventListener('submit',requestAccess);
-  document.addEventListener('click',e=>{const b=e.target.closest('[data-temp-user]');if(b)setTemporaryPassword(b.dataset.tempUser);const r=e.target.closest('[data-reject-user]');if(r)rejectAccessRequest(r.dataset.rejectUser);});
+  $('google-signin').addEventListener('click',signIn);
   document.querySelectorAll('[data-nav]').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.nav)));
   $('tx-form').addEventListener('submit',saveTransaction); $('payment-form').addEventListener('submit',savePayment);
   $('tx-method').addEventListener('change',sourceFields); $('tx-category').addEventListener('change',sourceFields);
@@ -254,4 +234,8 @@ function bindEvents() {
   if(localStorage.getItem('jamshi-dark')==='1'){$('toggle-dark').checked=true;document.body.classList.add('dark');}
 }
 
-document.addEventListener('DOMContentLoaded',()=>{bindEvents();showGate();});
+document.addEventListener('DOMContentLoaded',()=>{
+  bindEvents(); showGate();
+  if(window.google?.accounts?.oauth2) initGoogleIdentity();
+  else window.addEventListener('load',initGoogleIdentity,{once:true});
+});
