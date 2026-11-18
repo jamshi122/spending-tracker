@@ -55,8 +55,14 @@
       <h2 id="dash-net">QR 0.00</h2>
       <div class="hero-sub">
         <span>💵 Cash: <b id="dash-cash">QR 0.00</b></span>
-        <span>💳 Card debt: <b id="dash-cards">QR 0.00</b></span>
+        <span>💳 Card Debt: <b id="dash-cards">-QR 0.00</b></span>
       </div>
+    </div>
+
+    <!-- Separated Cash & Credit Card Overview Cards -->
+    <div class="kpi-row" style="grid-template-columns: 1fr 1fr; margin-bottom: 12px;">
+      <div class="kpi"><small>Available Cash / Bank</small><b id="dash-cash-sep" style="color:#34c759">QR 0.00</b></div>
+      <div class="kpi expense"><small>Credit Card Owed</small><b id="dash-cards-sep">-QR 0.00</b></div>
     </div>
 
     <div class="kpi-row">
@@ -231,7 +237,7 @@
     </form>
 
     <form id="form-payment" class="form hidden">
-      <p class="hint">ℹ️ Paying a card bill is a TRANSFER — not a new expense.</p>
+      <p class="hint">ℹ️ Paying a card bill deducts from your bank balance and reduces your credit card debt.</p>
       <div class="fg"><label>Card to pay</label>
         <select id="pay-card" required></select></div>
       <div class="fg"><label>From account</label>
@@ -256,7 +262,7 @@
     <button class="btn-secondary" id="btn-add-account">+ Add Account</button>
 
     <h3 style="margin-top:24px">💳 Credit Cards</h3>
-    <p class="hint">Cards for each family member. Only the owner (or Admin) can edit.</p>
+    <p class="hint">Negative balance indicates amount owed/borrowed on the card.</p>
     <div id="cards-list" class="list"></div>
     <button class="btn-secondary" id="btn-add-card">+ Add Credit Card</button>
   </main>
@@ -372,6 +378,6 @@
   </nav>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-<script src="app.js?v=9"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>

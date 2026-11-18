@@ -23,7 +23,6 @@ const FALLBACK_CATS = [
   {id:'12', name:'Other Income', type:'income', icon:'💵', parentId:''}
 ];
 
-// Keyword → category mapping for receipt OCR / text parser
 const RECEIPT_KEYWORDS = {
   'Food & Dining': [
     'burger','pizza','coffee','tea','meal','restaurant','food','lunch','dinner','breakfast',
@@ -44,7 +43,6 @@ const RECEIPT_KEYWORDS = {
   'Housing': ['rent','electricity','kahramaa','internet','wifi','ooredoo','vodafone']
 };
 
-// Store names → default category
 const STORE_DEFAULT_CAT = {
   'lulu': 'Food & Dining',
   'carrefour': 'Food & Dining',
@@ -60,8 +58,8 @@ let state = {
   fuel: [], categories: [], users: [], budgets: [],
   currentUserId: localStorage.getItem('currentUser') || '',
   isAdmin: false,
-  receiptFile: null,          // File object waiting to upload
-  existingReceiptUrl: ''      // when editing
+  receiptFile: null,
+  existingReceiptUrl: ''
 };
 
 // ---------- Utilities ----------
@@ -128,7 +126,7 @@ function setStatus(online) {
 
 function isAdmin() {
   const u = state.users.find(x => x.id === state.currentUserId);
-  return !!(u && (u.role === 'admin' || u.name === 'Husband')); // fallback for old data
+  return !!(u && (u.role === 'admin' || u.name === 'Husband'));
 }
 
 function getUserName(uid) {
@@ -141,12 +139,7 @@ function canEditTx(tx) {
   return String(tx.userId) === String(state.currentUserId);
 }
 
-function canManageAccount(ownerId) {
-  if (isAdmin()) return true;
-  return String(ownerId) === String(state.currentUserId);
-}
-
-// ---------- Local balance helpers (for optimistic UI) ----------
+// ---------- Local balance helpers ----------
 function localAdjustBalance(type, id, delta) {
   if (!id || !delta) return;
   if (type === 'card') {
@@ -159,7 +152,6 @@ function localAdjustBalance(type, id, delta) {
 }
 
 function applyLocalTxEffect(tx, mult) {
-  // mult = +1 apply, -1 reverse
   const amt = (parseFloat(tx.amount) || 0) * mult;
   if (tx.type === 'expense') {
     if (tx.cardId) localAdjustBalance('card', tx.cardId, amt);
@@ -176,7 +168,6 @@ function refreshCurrentView() {
   else if (document.getElementById('view-settings').classList.contains('active')) renderSettings();
 }
 
-/** Soft background sync – does NOT block UI */
 function backgroundSync() {
   fetchAll().then(ok => {
     if (ok) refreshCurrentView();
@@ -244,27 +235,19 @@ async function fetchAll() {
 }
 
 // ---------- Visibility filters ----------
-// Default: BOTH users see ALL transactions, cash and expenses.
-// Exception: a transaction marked isPrivate is only visible to its creator (and admin).
 function visibleTxs() {
   const uid = state.currentUserId;
   return state.transactions.filter(t => {
-    if (!t.isPrivate) return true;                    // public → everyone sees it
-    if (!uid) return true;                            // no profile selected → show all
-    if (String(t.userId) === String(uid)) return true; // owner always sees own private
-    if (isAdmin()) return true;                       // admin can see everything
-    return false;                                     // hide private txs of others
+    if (!t.isPrivate) return true;
+    if (!uid) return true;
+    if (String(t.userId) === String(uid)) return true;
+    if (isAdmin()) return true;
+    return false;
   });
 }
 
-// Cash & cards: both users always see all balances (shared family view)
-function visibleAccounts() {
-  return state.accounts;
-}
-
-function visibleCards() {
-  return state.cards;
-}
+function visibleAccounts() { return state.accounts; }
+function visibleCards() { return state.cards; }
 
 // ---------- Navigation ----------
 function switchView(name) {
@@ -290,10 +273,9 @@ function dateOffset(days) {
 }
 
 function renderDashboard() {
-  // ALWAYS show BOTH persons' data on the main dashboard (family totals)
   const txs = state.transactions.filter(t => !t.isPrivate || String(t.userId) === String(state.currentUserId) || isAdmin());
-  const accs = state.accounts; // all cash
-  const cards = state.cards;   // all cards
+  const accs = state.accounts;
+  const cards = state.cards;
   const cash = accs.reduce((s, a) => s + a.balance, 0);
   const debt = cards.reduce((s, c) => s + c.balance, 0);
   const net = cash - debt;
@@ -304,9 +286,19 @@ function renderDashboard() {
   const expense = recent30.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
   const saved = income - expense;
 
+  const debtFormatted = debt > 0 ? `-${money(debt)}` : money(0);
+
   document.getElementById('dash-net').innerText = money(net);
   document.getElementById('dash-cash').innerText = money(cash);
-  document.getElementById('dash-cards').innerText = money(debt);
+  document.getElementById('dash-cards').innerText = debtFormatted;
+
+  if (document.getElementById('dash-cash-sep')) {
+    document.getElementById('dash-cash-sep').innerText = money(cash);
+  }
+  if (document.getElementById('dash-cards-sep')) {
+    document.getElementById('dash-cards-sep').innerText = debtFormatted;
+  }
+
   document.getElementById('dash-income').innerText = money(income).replace('.00','');
   document.getElementById('dash-expense').innerText = money(expense).replace('.00','');
   document.getElementById('dash-saved').innerText = money(saved).replace('.00','');
@@ -317,7 +309,7 @@ function renderDashboard() {
   renderCashCardBar(recent30.filter(t => t.type === 'expense'));
   renderTopCategories(recent30.filter(t => t.type === 'expense'));
   renderTopSubcategories(recent30.filter(t => t.type === 'expense'));
-  renderFuelSummary(state.fuel); // both persons' fuel
+  renderFuelSummary(state.fuel);
   renderDashboardBudgets();
   renderRecent(txs);
 }
@@ -373,7 +365,6 @@ function renderSpendingTrends(txs) {
   const daysInThisMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
   const avgDailyThis = dayOfMonth > 0 ? thisExp / dayOfMonth : 0;
   const avgDailyLast = lastExp / (new Date(new Date().getFullYear(), new Date().getMonth(), 0).getDate() || 30);
-  // Projected full-month spend at current pace
   const projected = avgDailyThis * daysInThisMonth;
 
   const expDelta = pctChange(thisExp, lastExp);
@@ -381,14 +372,9 @@ function renderSpendingTrends(txs) {
   const avgDelta = pctChange(avgDailyThis, avgDailyLast);
 
   const deltaClass = (p) => p > 3 ? 'up' : p < -3 ? 'down' : 'flat';
-  const deltaLabel = (p, invertGood) => {
+  const deltaLabel = (p) => {
     const arrow = p > 3 ? '▲' : p < -3 ? '▼' : '●';
-    // For expenses, down is good (green); for income, up is good
     let cls = deltaClass(p);
-    if (invertGood) {
-      if (cls === 'up') cls = 'up';
-      if (cls === 'down') cls = 'down';
-    }
     return `<div class="trend-delta ${cls}">${arrow} ${Math.abs(p).toFixed(0)}% vs last month</div>`;
   };
 
@@ -398,7 +384,7 @@ function renderSpendingTrends(txs) {
       <div class="trend-card">
         <small>This month spend</small>
         <div class="trend-val expense" style="color:#ff3b30">${money(thisExp).replace('.00','')}</div>
-        ${deltaLabel(expDelta, true)}
+        ${deltaLabel(expDelta)}
       </div>
       <div class="trend-card">
         <small>Last month spend</small>
@@ -408,7 +394,7 @@ function renderSpendingTrends(txs) {
       <div class="trend-card">
         <small>Avg / day (this month)</small>
         <div class="trend-val">${money(avgDailyThis).replace('.00','')}</div>
-        ${deltaLabel(avgDelta, true)}
+        ${deltaLabel(avgDelta)}
       </div>
       <div class="trend-card">
         <small>Projected month-end</small>
@@ -418,7 +404,6 @@ function renderSpendingTrends(txs) {
     `;
   }
 
-  // Category trends: this month vs last for top categories
   const catThis = {}, catLast = {};
   txs.filter(t => t.type === 'expense' && t.date.startsWith(thisKey)).forEach(t => {
     catThis[t.category || 'Other'] = (catThis[t.category || 'Other'] || 0) + t.amount;
@@ -658,7 +643,6 @@ function renderHistory() {
         ? `${t.category || 'Other'} › ${t.subcategory}`
         : `${t.category || 'Other'} › (no subcategory)`;
     } else {
-      // week
       const d = new Date(t.date + 'T12:00:00');
       const day = d.getDay() || 7;
       d.setDate(d.getDate() - day + 1);
@@ -672,7 +656,6 @@ function renderHistory() {
     if (t.date > groups[key].endDate) groups[key].endDate = t.date;
   });
 
-  // Sort: for category/subcategory by expense desc; for dates reverse chrono
   let sortedKeys = Object.keys(groups);
   if (historyFilter.group === 'category' || historyFilter.group === 'subcategory') {
     sortedKeys.sort((a, b) => groups[b].exp - groups[a].exp);
@@ -709,9 +692,7 @@ function renderHistory() {
   document.getElementById('history-list').innerHTML = html || '<div class="empty">No matching transactions</div>';
 }
 
-function historyRowHTML(t) {
-  return txRowHTML(t);
-}
+function historyRowHTML(t) { return txRowHTML(t); }
 
 window.toggleGroup = function(k) {
   const el = document.getElementById(`group-${k}`);
@@ -728,7 +709,6 @@ function openEditModal(id) {
   const sub = [tx.subcategory, tx.product].filter(Boolean).join(' • ');
   const who = getUserName(tx.userId);
   const canEdit = canEditTx(tx);
-  // Owner or admin can toggle privacy
   const canTogglePrivacy = canEdit || isAdmin();
 
   document.getElementById('edit-details').innerHTML = `
@@ -755,7 +735,6 @@ function openEditModal(id) {
   document.getElementById('edit-open').style.display = canEdit ? '' : 'none';
   document.getElementById('edit-modal').classList.remove('hidden');
 
-  // Wire privacy toggle – optimistic
   const privacyBtn = document.getElementById('btn-toggle-privacy');
   if (privacyBtn) {
     privacyBtn.onclick = () => {
@@ -768,7 +747,6 @@ function openEditModal(id) {
       refreshCurrentView();
       toast(newPrivate ? 'Hidden from others 🔒' : 'Now visible to both 👁', 'success');
 
-      // Background save – no full refresh
       api('updateTx', {
         id: tx.id,
         data: {
@@ -780,7 +758,6 @@ function openEditModal(id) {
         }
       }).then(res => {
         if (!res.success) {
-          // Revert
           if (idx >= 0) state.transactions[idx].isPrivate = !newPrivate;
           refreshCurrentView();
           toast('Could not save privacy: ' + (res.error || ''), 'error');
@@ -807,7 +784,6 @@ document.getElementById('edit-delete').addEventListener('click', () => {
   const id = editingId;
   const snapshot = { ...tx };
 
-  // Optimistic: remove locally + reverse balance
   state.transactions = state.transactions.filter(t => t.id !== id);
   applyLocalTxEffect(snapshot, -1);
   if (snapshot.fuelId) {
@@ -819,10 +795,8 @@ document.getElementById('edit-delete').addEventListener('click', () => {
   refreshCurrentView();
   toast('Deleted', 'success');
 
-  // Background delete
   api('deleteTx', { id }).then(res => {
     if (!res.success) {
-      // Restore
       state.transactions.push(snapshot);
       applyLocalTxEffect(snapshot, +1);
       refreshCurrentView();
@@ -905,7 +879,6 @@ function populateAddForm() {
   populatePayOptions();
   updateSourceOptions();
   updateFuelFieldVisibility();
-  // vehicle datalist
   const vehicles = [...new Set(state.fuel.map(f => f.vehicle).filter(Boolean))];
   document.getElementById('vehicle-list').innerHTML = vehicles.map(v => `<option value="${escapeHtml(v)}">`).join('');
 }
@@ -965,12 +938,22 @@ function updateSourceOptions() {
     sel.innerHTML = accs.map(a => `<option value="${a.id}">${a.name} (${getUserName(a.owner)}) — ${money(a.balance)}</option>`).join('') || '<option value="">No accounts</option>';
   } else {
     const cards = visibleCards();
-    sel.innerHTML = cards.map(c => `<option value="${c.id}">${c.name} •${c.last4} (${getUserName(c.owner)}) — ${money(c.balance)}</option>`).join('') || '<option value="">No cards</option>';
+    sel.innerHTML = cards.map(c => {
+      const owed = parseFloat(c.balance) || 0;
+      const limit = parseFloat(c.limit) || 0;
+      const avail = limit - owed;
+      return `<option value="${c.id}">${c.name} •${c.last4} (${getUserName(c.owner)}) — Avail: ${money(avail)} | Owed: -${money(owed)}</option>`;
+    }).join('') || '<option value="">No cards</option>';
   }
 }
 
 function populatePayOptions() {
-  document.getElementById('pay-card').innerHTML = visibleCards().map(c => `<option value="${c.id}">${c.name} •${c.last4} (${getUserName(c.owner)}) — ${money(c.balance)} owed</option>`).join('') || '<option value="">No cards</option>';
+  document.getElementById('pay-card').innerHTML = visibleCards().map(c => {
+    const owed = parseFloat(c.balance) || 0;
+    const limit = parseFloat(c.limit) || 0;
+    const avail = limit - owed;
+    return `<option value="${c.id}">${c.name} •${c.last4} — Owed: -${money(owed)} (Avail: ${money(avail)})</option>`;
+  }).join('') || '<option value="">No cards</option>';
   document.getElementById('pay-account').innerHTML = visibleAccounts().map(a => `<option value="${a.id}">${a.name} — ${money(a.balance)}</option>`).join('') || '<option value="">No accounts</option>';
 }
 
@@ -987,7 +970,6 @@ receiptInput.addEventListener('change', () => {
   state.receiptFile = file;
   state.existingReceiptUrl = '';
   updateReceiptUI();
-  // Auto-offer OCR for images
   if (file.type.startsWith('image/')) {
     document.getElementById('btn-scan-ocr').classList.remove('hidden');
   }
@@ -1036,9 +1018,8 @@ function updateReceiptUI() {
   }
 }
 
-/** Compress / resize image for faster OCR */
 function prepareImageForOCR(file) {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
     img.onload = () => {
@@ -1111,7 +1092,7 @@ function guessCategory(desc, fullText) {
   for (const [category, words] of Object.entries(RECEIPT_KEYWORDS)) {
     if (words.some(w => lower.includes(w))) return category;
   }
-  return 'Food & Dining'; // default for unclear grocery-like lines
+  return 'Food & Dining';
 }
 
 function parseReceiptText(text) {
@@ -1120,18 +1101,17 @@ function parseReceiptText(text) {
     return;
   }
 
-  const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean);
+  const lines = text.split(/
+/).map(l => l.trim()).filter(Boolean);
   const suggestions = [];
   let receiptTotal = null;
   let receiptDate = null;
 
-  // Detect total
   for (const line of lines) {
     const t = line.match(/total\s*[:\s]*(\d+[.,]\d{2})/i);
     if (t) receiptTotal = parseFloat(t[1].replace(',', '.'));
   }
 
-  // Detect date (e.g. 17.11.2026 or 17/11/2026)
   for (const line of lines) {
     const d = line.match(/(\d{1,2})[./](\d{1,2})[./](\d{2,4})/);
     if (d) {
@@ -1142,19 +1122,15 @@ function parseReceiptText(text) {
     }
   }
 
-  // Skip junk lines
   const skipRe = /customer|tel:|fax:|visa|mastercard|auth|eft|card no|points|happiness|thank|items\s*:|payment|receipt|store|pos|self checkout|www\.|lulu hyper/i;
 
   lines.forEach(line => {
     if (skipRe.test(line)) return;
     if (/^total/i.test(line)) return;
-    if (/^\d{10,}$/.test(line.replace(/\s/g,''))) return; // barcode-only line
+    if (/^\d{10,}$/.test(line.replace(/\s/g,''))) return;
 
     let amount = 0, desc = line;
-
-    // "Item name .... 5.94" or "Item 5.94"
     const m1 = line.match(/^(.*?)[\s.]+(\d+[.,]\d{2})\s*$/);
-    // "2 x 1.00" style qty lines – skip or fold into next
     const qtyOnly = line.match(/^\d+\s*x\s+(\d+[.,]\d{2})\s*$/i);
     if (qtyOnly) return;
 
@@ -1169,18 +1145,15 @@ function parseReceiptText(text) {
       }
     }
 
-    // Clean description
     desc = desc.replace(/^\d{8,}\s*/, '').replace(/\s+/g, ' ').trim();
     if (!desc || desc.length < 2) return;
     if (!amount || amount <= 0 || amount > 50000) return;
-    // Avoid treating the grand total as an item if already captured
     if (receiptTotal && Math.abs(amount - receiptTotal) < 0.01 && /total/i.test(line)) return;
 
     const category = guessCategory(desc, text);
     suggestions.push({ desc, amount, category });
   });
 
-  // Deduplicate near-identical lines
   const seen = new Set();
   const unique = suggestions.filter(s => {
     const k = s.desc.toLowerCase() + '|' + s.amount.toFixed(2);
@@ -1196,7 +1169,6 @@ function parseReceiptText(text) {
     return;
   }
 
-  // Prefer item sum; fall back to receipt total
   const itemsSum = unique.reduce((s, x) => s + x.amount, 0);
   const mainTotal = receiptTotal || itemsSum;
   const mainCat = unique[0]?.category || guessCategory(text, text) || 'Food & Dining';
@@ -1254,7 +1226,6 @@ window.applySuggestion = function(idx) {
     catSelect.value = s.category;
     updateSubcategories();
     updateFuelFieldVisibility();
-    // Prefer Groceries subcategory if present
     setTimeout(() => {
       const sub = document.getElementById('tx-subcategory');
       const g = [...sub.options].find(o => /grocer/i.test(o.value));
@@ -1286,7 +1257,6 @@ window.applyReceiptTotal = function() {
   toast(`Filled total ${money(b.total)} → ${b.category}`, 'success');
 };
 
-// ---------- File → base64 helper ----------
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1337,10 +1307,9 @@ document.getElementById('form-tx').addEventListener('submit', async (e) => {
   const noteVal = document.getElementById('tx-note').value;
   const accountId = sourceType === 'account' ? sourceId : '';
   const cardId = sourceType === 'card' ? sourceId : '';
-  const receiptFile = state.receiptFile; // capture before reset
+  const receiptFile = state.receiptFile;
   let receiptUrl = state.existingReceiptUrl || '';
 
-  // ---- OPTIMISTIC local update first ----
   let localTx = null;
   let oldTxSnapshot = null;
   let fuelPayload = null;
@@ -1349,7 +1318,7 @@ document.getElementById('form-tx').addEventListener('submit', async (e) => {
     const idx = state.transactions.findIndex(t => t.id === editId);
     if (idx >= 0) {
       oldTxSnapshot = { ...state.transactions[idx] };
-      applyLocalTxEffect(oldTxSnapshot, -1); // reverse old effect
+      applyLocalTxEffect(oldTxSnapshot, -1);
       localTx = {
         ...oldTxSnapshot,
         date: dateVal, type: typeVal, amount, category,
@@ -1394,13 +1363,11 @@ document.getElementById('form-tx').addEventListener('submit', async (e) => {
     }
   }
 
-  // Instant UI feedback
   resetAddForm();
   switchView('dashboard');
   toast(editId ? 'Updated ✓' : 'Saved ✓', 'success');
   setButtonLoading(btn, false);
 
-  // Notify if this expense category is over budget
   if (typeVal === 'expense' || isFuel) {
     const catName = isFuel ? 'Fuel' : category;
     const budget = (state.budgets || []).find(b => b.category === catName);
@@ -1415,7 +1382,6 @@ document.getElementById('form-tx').addEventListener('submit', async (e) => {
     }
   }
 
-  // ---- Background: receipt upload (if any) then API ----
   (async () => {
     try {
       if (receiptFile) {
@@ -1423,7 +1389,6 @@ document.getElementById('form-tx').addEventListener('submit', async (e) => {
         const up = await api('uploadReceipt', { data: { base64, mimeType, name } });
         if (up.success && up.url) {
           receiptUrl = up.url;
-          // patch local
           const t = state.transactions.find(x => x.id === localTx.id);
           if (t) t.receiptUrl = receiptUrl;
         }
@@ -1449,9 +1414,7 @@ document.getElementById('form-tx').addEventListener('submit', async (e) => {
       }
 
       if (!res.success) throw new Error(res.error || 'Save failed');
-      // Optional light sync later – not blocking
     } catch (err) {
-      // Revert optimistic change
       if (editId && oldTxSnapshot) {
         const idx = state.transactions.findIndex(t => t.id === editId);
         if (idx >= 0) {
@@ -1466,7 +1429,6 @@ document.getElementById('form-tx').addEventListener('submit', async (e) => {
       }
       refreshCurrentView();
       toast('Save failed – reverted: ' + (err.message || err), 'error');
-      // Recover truth from server
       backgroundSync();
     }
   })();
@@ -1487,7 +1449,7 @@ document.getElementById('form-payment').addEventListener('submit', (e) => {
 
   if (!amount || amount <= 0) { toast('Enter valid amount', 'error'); return; }
 
-  // Optimistic balance change
+  // Reduce credit card owed balance AND deduct payment from main bank account
   localAdjustBalance('card', cardId, -amount);
   if (accountId) localAdjustBalance('acc', accountId, -amount);
 
@@ -1521,7 +1483,21 @@ function renderAccounts() {
     : '<div class="empty">No accounts yet</div>';
 
   document.getElementById('cards-list').innerHTML = cards.length
-    ? cards.map(c => `<div class="item"><div class="item-icon" style="background:${c.color}22">💳</div><div class="item-info"><div class="item-title">${escapeHtml(c.name)} •${c.last4}</div><div class="item-sub">${getUserName(c.owner)} • Limit ${money(c.limit)}</div></div><div class="item-amt expense">${money(c.balance)}</div></div>`).join('')
+    ? cards.map(c => {
+        const owed = parseFloat(c.balance) || 0;
+        const limit = parseFloat(c.limit) || 0;
+        const available = limit - owed;
+        const displayOwed = owed > 0 ? `-${money(owed)}` : money(0);
+        return `<div class="item">
+          <div class="item-icon" style="background:${c.color}22">💳</div>
+          <div class="item-info">
+            <div class="item-title">${escapeHtml(c.name)} •${c.last4}</div>
+            <div class="item-sub">${getUserName(c.owner)} • Limit ${money(limit)}</div>
+            <div class="item-sub" style="color:#007aff;font-weight:600;margin-top:2px;">Available to spend: ${money(available)}</div>
+          </div>
+          <div class="item-amt expense">${displayOwed}</div>
+        </div>`;
+      }).join('')
     : '<div class="empty">No cards yet</div>';
 }
 
@@ -1544,7 +1520,7 @@ document.getElementById('btn-add-card').addEventListener('click', async () => {
   if (!state.currentUserId) { toast('Select your profile first', 'error'); return; }
   const name = prompt('Card name:'); if (!name) return;
   const last4 = prompt('Last 4 digits:', '0000') || '0000';
-  const limit = parseFloat(prompt('Credit limit (QR):', '5000') || '5000');
+  const limit = parseFloat(prompt('Credit limit (QR):', '9000') || '9000');
   const dueDay = parseInt(prompt('Due day of month (1-28):', '15') || '15');
   const owner = isAdmin() ? (prompt('Owner user id (leave blank for yourself):', state.currentUserId) || state.currentUserId) : state.currentUserId;
   const color = prompt('Color hex:', '#1c1c1e') || '#1c1c1e';
@@ -1622,7 +1598,6 @@ document.getElementById('btn-admin-add-user').addEventListener('click', async ()
 // ---------- Budgets ----------
 function getBudgetSpent(category, days = 30) {
   const cutoff = dateOffset(-days);
-  // Both persons' spending against family budgets
   return state.transactions
     .filter(t => t.type === 'expense' && t.date >= cutoff && t.category === category)
     .reduce((s, t) => s + t.amount, 0);
@@ -1754,14 +1729,13 @@ document.getElementById('btn-add-budget').addEventListener('click', () => {
       toast('Could not save: ' + (res.error || ''), 'error');
       backgroundSync();
     } else {
-      backgroundSync(); // pick up server id if any
+      backgroundSync();
     }
   });
 });
 
 // ---------- Print ----------
 document.getElementById('btn-print')?.addEventListener('click', () => {
-  // Ensure dashboard is showing family totals, then print
   switchView('dashboard');
   setTimeout(() => window.print(), 200);
 });
@@ -1850,14 +1824,12 @@ function renderUserSwitcher() {
   }
 
   if (isAdmin()) {
-    // Admin can switch freely (including "Both")
     sel.classList.remove('hidden');
     badge.classList.add('hidden');
     sel.innerHTML = '<option value="">👥 Both (Admin)</option>' +
       state.users.map(u => `<option value="${u.id}">${u.name}${u.role === 'admin' ? ' 👑' : ''}</option>`).join('');
     sel.value = state.currentUserId || '';
   } else {
-    // Regular user: locked to self
     sel.classList.add('hidden');
     badge.classList.remove('hidden');
     badge.textContent = getUserName(state.currentUserId);
@@ -1889,7 +1861,6 @@ function showLoginGate() {
       const user = state.users.find(u => u.id === id);
       if (!user) return;
 
-      // Admin requires PIN
       if (user.role === 'admin' || user.name === 'Husband') {
         document.getElementById('pin-section').classList.remove('hidden');
         document.getElementById('login-error').classList.add('hidden');
@@ -1929,7 +1900,6 @@ async function init() {
   try {
     const loaded = await fetchAll();
 
-    // Seed default users + accounts once
     if (loaded && state.users.length === 0 && !hasSeeded) {
       hasSeeded = true;
       showSaving('Setting up first time…');
@@ -1941,7 +1911,6 @@ async function init() {
       hideSaving();
     }
 
-    // If no current user selected → show login
     if (!state.currentUserId || !state.users.find(u => u.id === state.currentUserId)) {
       showLoginGate();
     } else {
@@ -1956,7 +1925,6 @@ async function init() {
     renderDashboard();
   } catch (err) { console.error(err); }
 
-  // Soft background sync every 3 minutes (non-blocking)
   setInterval(() => { backgroundSync(); }, 180000);
 }
 
