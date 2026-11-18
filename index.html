@@ -12,20 +12,40 @@
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="manifest" href="manifest.json">
-<link rel="stylesheet" href="style.css?v=2">
+<link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
 <div class="app">
+  <!-- LOGIN / PIN GATE -->
+  <div id="login-gate" class="login-gate hidden">
+    <div class="login-card">
+      <img src="logo.svg" class="login-logo" alt="Jamshi Solution" onerror="this.style.display='none'">
+      <h2>Jamshi Solution</h2>
+      <p class="hint">Select your profile to continue</p>
+      <div id="login-users" class="login-users"></div>
+      <div id="pin-section" class="pin-section hidden">
+        <label>Enter PIN</label>
+        <input type="password" id="login-pin" inputmode="numeric" maxlength="6" placeholder="••••">
+        <button class="btn-primary" id="btn-login">Unlock</button>
+        <p id="login-error" class="error-text hidden">Wrong PIN</p>
+      </div>
+    </div>
+  </div>
+
   <header>
     <div class="brand">
-      <img src="logo.svg" class="brand-logo" alt="Jamshi Solution">
+      <img src="logo.svg" class="brand-logo" alt="Jamshi Solution" onerror="this.style.display='none'">
       <h1 id="page-title">Dashboard</h1>
     </div>
     <div class="header-right">
-      <select id="user-switcher"><option>Loading...</option></select>
-      <span id="status" class="status-dot">●</span>
+      <select id="user-switcher" class="hidden"><option>Loading...</option></select>
+      <span id="current-user-badge" class="user-badge"></span>
+      <span id="status" class="status-dot" title="Connection">●</span>
     </div>
   </header>
+
+  <!-- Global toast -->
+  <div id="toast" class="toast hidden"></div>
 
   <!-- DASHBOARD -->
   <main id="view-dashboard" class="view active">
@@ -78,7 +98,7 @@
     <div id="dash-recent" class="list"></div>
   </main>
 
-  <!-- HISTORY (search/filter/edit/grouping) -->
+  <!-- HISTORY -->
   <main id="view-history" class="view">
     <input type="text" id="search-input" placeholder="🔍 Search transactions..." class="search-bar">
     
@@ -123,7 +143,7 @@
       <input type="hidden" id="tx-edit-id" value="">
 
       <div class="fg"><label>Amount (QR)</label>
-        <input type="number" id="tx-amount" step="0.01" placeholder="0.00" required></div>
+        <input type="number" id="tx-amount" step="0.01" placeholder="0.00" required inputmode="decimal"></div>
 
       <div class="fg"><label>Main Category</label>
         <select id="tx-category" required></select></div>
@@ -134,13 +154,14 @@
       <div id="fuel-fields" class="fuel-fields hidden">
         <div class="fuel-header">⛽ Fuel Details</div>
         <div class="fg"><label>Vehicle</label>
-          <input type="text" id="fuel-vehicle" placeholder="e.g. Camry"></div>
+          <input type="text" id="fuel-vehicle" placeholder="e.g. Camry" list="vehicle-list"></div>
+        <datalist id="vehicle-list"></datalist>
         <div class="fg"><label>Odometer (km)</label>
-          <input type="number" id="fuel-odo" step="1" placeholder="e.g. 45230"></div>
+          <input type="number" id="fuel-odo" step="1" placeholder="e.g. 45230" inputmode="numeric"></div>
         <div class="fg"><label>Liters</label>
-          <input type="number" id="fuel-liters" step="0.01" placeholder="0.00"></div>
+          <input type="number" id="fuel-liters" step="0.01" placeholder="0.00" inputmode="decimal"></div>
         <div class="fg"><label>Price per Liter (QR)</label>
-          <input type="number" id="fuel-ppl" step="0.001" placeholder="0.000"></div>
+          <input type="number" id="fuel-ppl" step="0.001" placeholder="0.000" inputmode="decimal"></div>
         <div class="fg"><label>Total (QR)</label>
           <input type="number" id="fuel-total" step="0.01" readonly></div>
         <div class="fg checkbox-fg"><label>
@@ -166,7 +187,29 @@
       <div class="fg"><label>Date</label>
         <input type="date" id="tx-date" required></div>
 
-      <button class="btn-primary" type="submit" id="btn-save-tx">Save</button>
+      <!-- BILL / RECEIPT ATTACHMENT -->
+      <div class="fg">
+        <label>📎 Attach Bill / Receipt (optional)</label>
+        <div class="file-row">
+          <input type="file" id="tx-receipt" accept="image/*,.pdf" class="file-input">
+          <span id="receipt-name" class="file-name"></span>
+          <button type="button" class="link-btn hidden" id="btn-clear-receipt">Clear</button>
+        </div>
+        <div id="receipt-preview" class="receipt-preview hidden"></div>
+      </div>
+
+      <!-- RECEIPT TEXT PARSER (BONUS) -->
+      <div class="fg" id="receipt-parse-box">
+        <label>🧾 Paste receipt text (optional – auto-categorize items)</label>
+        <textarea id="receipt-text" rows="3" placeholder="Paste lines from receipt, e.g.&#10;Burger 25.00&#10;Dress 180.00&#10;Coffee 12.50"></textarea>
+        <button type="button" class="btn-secondary" id="btn-parse-receipt" style="margin-top:6px">Suggest Categories from Text</button>
+        <div id="parse-suggestions" class="parse-suggestions hidden"></div>
+      </div>
+
+      <button class="btn-primary" type="submit" id="btn-save-tx">
+        <span class="btn-text">Save</span>
+        <span class="btn-spinner hidden">Saving…</span>
+      </button>
       <button class="btn-secondary hidden" type="button" id="btn-cancel-edit">Cancel Edit</button>
     </form>
 
@@ -177,12 +220,15 @@
       <div class="fg"><label>From account</label>
         <select id="pay-account" required></select></div>
       <div class="fg"><label>Amount (QR)</label>
-        <input type="number" id="pay-amount" step="0.01" required></div>
+        <input type="number" id="pay-amount" step="0.01" required inputmode="decimal"></div>
       <div class="fg"><label>Note</label>
         <input type="text" id="pay-note" placeholder="Optional"></div>
       <div class="fg"><label>Date</label>
         <input type="date" id="pay-date" required></div>
-      <button class="btn-primary" type="submit">Record Payment</button>
+      <button class="btn-primary" type="submit" id="btn-save-payment">
+        <span class="btn-text">Record Payment</span>
+        <span class="btn-spinner hidden">Saving…</span>
+      </button>
     </form>
   </main>
 
@@ -193,28 +239,29 @@
     <button class="btn-secondary" id="btn-add-account">+ Add Account</button>
 
     <h3 style="margin-top:24px">💳 Credit Cards</h3>
-    <p class="hint">Cards for Husband and Wife. Add as many as you need.</p>
+    <p class="hint">Cards for each family member. Only the owner (or Admin) can edit.</p>
     <div id="cards-list" class="list"></div>
     <button class="btn-secondary" id="btn-add-card">+ Add Credit Card</button>
   </main>
 
-  <!-- SETTINGS / ADMIN -->
+  <!-- SETTINGS -->
   <main id="view-settings" class="view">
-    <!-- ADMIN PANEL -->
     <div class="about-brand">
-      <img src="logo.svg" alt="Jamshi Solution">
+      <img src="logo.svg" alt="Jamshi Solution" onerror="this.style.display='none'">
       <div class="about-name">Jamshi Solution</div>
       <div class="about-sub">Spending Tracker</div>
     </div>
 
-    <div class="box" style="border: 2px solid #007aff;">
+    <!-- ADMIN ONLY PANEL -->
+    <div id="admin-panel" class="box hidden" style="border: 2px solid #007aff;">
       <h3>🔐 Admin Panel</h3>
-      <p class="hint">Manage users and categories here.</p>
-      <div style="display:flex; gap:8px; margin-bottom:8px;">
-        <button id="btn-admin-add-user" class="btn-secondary" style="margin-top:0">+ User</button>
-        <button id="btn-admin-add-cat" class="btn-primary" style="margin-top:0; padding:11px">+ Category</button>
+      <p class="hint">Only visible to Admin. Manage users, categories and visibility.</p>
+      <div style="display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
+        <button id="btn-admin-add-user" class="btn-secondary" style="margin-top:0;flex:1">+ User</button>
+        <button id="btn-admin-add-cat" class="btn-primary" style="margin-top:0;padding:11px;flex:1">+ Category</button>
       </div>
-      <div id="admin-cat-list" style="margin-top: 10px; max-height: 200px; overflow-y: auto; background: #f9f9f9; border-radius: 8px; padding: 8px;"></div>
+      <div id="admin-users-list" style="margin-bottom:12px;"></div>
+      <div id="admin-cat-list" style="max-height:180px; overflow-y:auto; background:#f9f9f9; border-radius:8px; padding:8px;"></div>
     </div>
 
     <div class="box">
@@ -236,8 +283,10 @@
       <button id="btn-add-budget" class="btn-secondary">+ Set Budget</button>
     </div>
 
-    <div class="box">
-      <h3>📊 Google Sheet</h3>
+    <!-- Google Sheet – ADMIN ONLY -->
+    <div id="sheet-box" class="box hidden">
+      <h3>📊 Google Sheet (Admin only)</h3>
+      <p class="hint">This link is only visible to the Admin account.</p>
       <a id="sheet-link" href="#" target="_blank" class="btn-secondary">Open Sheet ↗</a>
     </div>
 
@@ -254,6 +303,8 @@
     <div class="box">
       <h3>ℹ️ Info</h3>
       <p id="info-count" class="hint">0 transactions</p>
+      <p class="hint" id="info-user">Signed in as: —</p>
+      <button id="btn-logout" class="btn-secondary" style="color:#ff3b30;border-color:#ff3b30;margin-top:10px">Switch / Logout</button>
     </div>
   </main>
 
@@ -281,6 +332,15 @@
     </div>
   </div>
 
+  <!-- Saving Overlay (global) -->
+  <div id="saving-overlay" class="update-overlay hidden">
+    <div class="update-box">
+      <div class="spinner"></div>
+      <h3 id="saving-title">Saving…</h3>
+      <p class="hint" id="saving-hint">Please wait a moment</p>
+    </div>
+  </div>
+
   <nav class="bottom-nav">
     <button class="nav-btn active" data-view="dashboard">🏠<span>Home</span></button>
     <button class="nav-btn" data-view="history">🔍<span>History</span></button>
@@ -289,6 +349,6 @@
     <button class="nav-btn" data-view="settings">⚙️<span>More</span></button>
   </nav>
 </div>
-<script src="app.js?v=7"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>
