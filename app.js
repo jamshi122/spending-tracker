@@ -23,16 +23,36 @@ const FALLBACK_CATS = [
   {id:'12', name:'Other Income', type:'income', icon:'💵', parentId:''}
 ];
 
-// Simple keyword → category mapping for receipt text parser (bonus)
+// Keyword → category mapping for receipt OCR / text parser
 const RECEIPT_KEYWORDS = {
-  'Food & Dining': ['burger','pizza','coffee','tea','meal','restaurant','food','lunch','dinner','breakfast','sandwich','shawarma','kebab','chicken','rice','water','juice','cola','soda','snack','bakery','bread','milk','egg','grocery','supermarket','carrefour','lulu','mono','talabat','deliveroo'],
+  'Food & Dining': [
+    'burger','pizza','coffee','tea','meal','restaurant','food','lunch','dinner','breakfast',
+    'sandwich','shawarma','kebab','chicken','rice','water','juice','cola','soda','snack',
+    'bakery','bread','milk','egg','grocery','supermarket','carrefour','lulu','mono','talabat',
+    'deliveroo','yoghurt','yogurt','onion','mackerel','sardine','fish','meat','beef','lamb',
+    'vegetable','fruit','biscuit','cookie','cream','cheese','butter','oil','sugar','flour',
+    'pasta','noodle','sauce','spice','salt','tomato','potato','garlic','lemon','banana',
+    'apple','orange','chicken','tuna','shrimp','prawn','dal','lentil','bean','rice','atta',
+    'nabil','awafi','cremore','hypermarket','hyper market'
+  ],
   'Shopping': ['dress','shirt','pants','shoes','clothes','clothing','t-shirt','jeans','bag','wallet','perfume','watch','electronics','phone','charger','cable','earphone','gift'],
-  'Fuel': ['petrol','diesel','fuel','gas station','woqod','shell','total'],
+  'Fuel': ['petrol','diesel','fuel','gas station','woqod','shell'],
   'Transportation': ['taxi','uber','careem','parking','salik','toll','metro','bus'],
   'Health': ['pharmacy','medicine','doctor','clinic','hospital','dental','gym'],
   'Entertainment': ['movie','cinema','ticket','game','netflix','spotify'],
   'Personal Care': ['haircut','salon','spa','massage','cosmetics'],
   'Housing': ['rent','electricity','kahramaa','internet','wifi','ooredoo','vodafone']
+};
+
+// Store names → default category
+const STORE_DEFAULT_CAT = {
+  'lulu': 'Food & Dining',
+  'carrefour': 'Food & Dining',
+  'family food': 'Food & Dining',
+  'mega mart': 'Food & Dining',
+  'al meera': 'Food & Dining',
+  'woqod': 'Fuel',
+  'shell': 'Fuel'
 };
 
 let state = {
@@ -954,7 +974,7 @@ function populatePayOptions() {
   document.getElementById('pay-account').innerHTML = visibleAccounts().map(a => `<option value="${a.id}">${a.name} — ${money(a.balance)}</option>`).join('') || '<option value="">No accounts</option>';
 }
 
-// ---------- Receipt attachment UI ----------
+// ---------- Receipt attachment + OCR ----------
 const receiptInput = document.getElementById('tx-receipt');
 receiptInput.addEventListener('change', () => {
   const file = receiptInput.files[0];
@@ -967,6 +987,10 @@ receiptInput.addEventListener('change', () => {
   state.receiptFile = file;
   state.existingReceiptUrl = '';
   updateReceiptUI();
+  // Auto-offer OCR for images
+  if (file.type.startsWith('image/')) {
+    document.getElementById('btn-scan-ocr').classList.remove('hidden');
+  }
 });
 
 document.getElementById('btn-clear-receipt').addEventListener('click', () => {
@@ -974,80 +998,249 @@ document.getElementById('btn-clear-receipt').addEventListener('click', () => {
   state.existingReceiptUrl = '';
   receiptInput.value = '';
   updateReceiptUI();
+  document.getElementById('btn-scan-ocr').classList.add('hidden');
+  document.getElementById('ocr-status').classList.add('hidden');
 });
 
 function updateReceiptUI() {
   const nameEl = document.getElementById('receipt-name');
   const preview = document.getElementById('receipt-preview');
   const clearBtn = document.getElementById('btn-clear-receipt');
+  const scanBtn = document.getElementById('btn-scan-ocr');
 
   if (state.receiptFile) {
-    nameEl.textContent = state.receiptFile.name;
+    nameEl.textContent = state.receiptFile.name || 'Photo';
     clearBtn.classList.remove('hidden');
     if (state.receiptFile.type.startsWith('image/')) {
       const url = URL.createObjectURL(state.receiptFile);
       preview.innerHTML = `<img src="${url}" alt="preview">`;
       preview.classList.remove('hidden');
+      if (scanBtn) scanBtn.classList.remove('hidden');
     } else {
       preview.innerHTML = `<span>📄 ${escapeHtml(state.receiptFile.name)}</span>`;
       preview.classList.remove('hidden');
+      if (scanBtn) scanBtn.classList.add('hidden');
     }
   } else if (state.existingReceiptUrl) {
     nameEl.textContent = 'Attached bill';
     clearBtn.classList.remove('hidden');
     preview.innerHTML = `<a href="${escapeHtml(state.existingReceiptUrl)}" target="_blank">📎 View current attachment</a>`;
     preview.classList.remove('hidden');
+    if (scanBtn) scanBtn.classList.add('hidden');
   } else {
     nameEl.textContent = '';
     clearBtn.classList.add('hidden');
     preview.classList.add('hidden');
     preview.innerHTML = '';
+    if (scanBtn) scanBtn.classList.add('hidden');
   }
 }
 
-// ---------- Receipt text parser (bonus) ----------
-document.getElementById('btn-parse-receipt').addEventListener('click', () => {
-  const text = document.getElementById('receipt-text').value.trim();
-  if (!text) { toast('Paste some receipt lines first'); return; }
+/** Compress / resize image for faster OCR */
+function prepareImageForOCR(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const maxW = 1600;
+      let w = img.width, h = img.height;
+      if (w > maxW) { h = Math.round(h * maxW / w); w = maxW; }
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      canvas.toBlob(b => resolve(b || file), 'image/jpeg', 0.85);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+    img.src = url;
+  });
+}
 
-  const lines = text.split(/\n|;/).map(l => l.trim()).filter(Boolean);
+document.getElementById('btn-scan-ocr')?.addEventListener('click', async () => {
+  if (!state.receiptFile || !state.receiptFile.type.startsWith('image/')) {
+    toast('Take or choose a receipt photo first', 'error');
+    return;
+  }
+  if (typeof Tesseract === 'undefined') {
+    toast('OCR library not loaded – check internet', 'error');
+    return;
+  }
+
+  const status = document.getElementById('ocr-status');
+  const scanBtn = document.getElementById('btn-scan-ocr');
+  status.classList.remove('hidden');
+  status.textContent = 'Scanning receipt… 0%';
+  scanBtn.disabled = true;
+
+  try {
+    const blob = await prepareImageForOCR(state.receiptFile);
+    const result = await Tesseract.recognize(blob, 'eng', {
+      logger: m => {
+        if (m.status === 'recognizing text' && m.progress != null) {
+          status.textContent = `Scanning receipt… ${Math.round(m.progress * 100)}%`;
+        }
+      }
+    });
+    const text = (result?.data?.text || '').trim();
+    if (!text) {
+      status.textContent = 'Could not read text – try a clearer photo';
+      toast('OCR found no text', 'error');
+      return;
+    }
+    document.getElementById('receipt-text').value = text;
+    status.textContent = 'Scan complete – reviewing items…';
+    parseReceiptText(text);
+    toast('Receipt scanned ✓', 'success');
+  } catch (err) {
+    console.error(err);
+    status.textContent = 'Scan failed';
+    toast('OCR failed: ' + (err.message || err), 'error');
+  } finally {
+    scanBtn.disabled = false;
+  }
+});
+
+function guessCategory(desc, fullText) {
+  const lower = (desc + ' ' + (fullText || '')).toLowerCase();
+  for (const [store, cat] of Object.entries(STORE_DEFAULT_CAT)) {
+    if (lower.includes(store)) return cat;
+  }
+  for (const [category, words] of Object.entries(RECEIPT_KEYWORDS)) {
+    if (words.some(w => lower.includes(w))) return category;
+  }
+  return 'Food & Dining'; // default for unclear grocery-like lines
+}
+
+function parseReceiptText(text) {
+  if (!text || !text.trim()) {
+    toast('No text to parse', 'error');
+    return;
+  }
+
+  const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean);
   const suggestions = [];
+  let receiptTotal = null;
+  let receiptDate = null;
+
+  // Detect total
+  for (const line of lines) {
+    const t = line.match(/total\s*[:\s]*(\d+[.,]\d{2})/i);
+    if (t) receiptTotal = parseFloat(t[1].replace(',', '.'));
+  }
+
+  // Detect date (e.g. 17.11.2026 or 17/11/2026)
+  for (const line of lines) {
+    const d = line.match(/(\d{1,2})[./](\d{1,2})[./](\d{2,4})/);
+    if (d) {
+      let y = d[3];
+      if (y.length === 2) y = '20' + y;
+      receiptDate = `${y}-${d[2].padStart(2,'0')}-${d[1].padStart(2,'0')}`;
+      break;
+    }
+  }
+
+  // Skip junk lines
+  const skipRe = /customer|tel:|fax:|visa|mastercard|auth|eft|card no|points|happiness|thank|items\s*:|payment|receipt|store|pos|self checkout|www\.|lulu hyper/i;
 
   lines.forEach(line => {
-    // Try to extract amount at the end: "Item name 25.50" or "25.50 Item"
-    let amount = 0, desc = line;
-    const m1 = line.match(/^(.*?)[\s:]+(\d+[.,]\d{1,3})$/);
-    const m2 = line.match(/^(\d+[.,]\d{1,3})[\s:]+(.*)$/);
-    if (m1) { desc = m1[1].trim(); amount = parseFloat(m1[2].replace(',','.')); }
-    else if (m2) { amount = parseFloat(m2[1].replace(',','.')); desc = m2[2].trim(); }
-    else {
-      const nums = line.match(/(\d+[.,]\d{1,3})/g);
-      if (nums) amount = parseFloat(nums[nums.length-1].replace(',','.'));
-    }
-    if (!amount || amount <= 0) return;
+    if (skipRe.test(line)) return;
+    if (/^total/i.test(line)) return;
+    if (/^\d{10,}$/.test(line.replace(/\s/g,''))) return; // barcode-only line
 
-    const lower = desc.toLowerCase();
-    let cat = 'Other';
-    for (const [category, words] of Object.entries(RECEIPT_KEYWORDS)) {
-      if (words.some(w => lower.includes(w))) { cat = category; break; }
+    let amount = 0, desc = line;
+
+    // "Item name .... 5.94" or "Item 5.94"
+    const m1 = line.match(/^(.*?)[\s.]+(\d+[.,]\d{2})\s*$/);
+    // "2 x 1.00" style qty lines – skip or fold into next
+    const qtyOnly = line.match(/^\d+\s*x\s+(\d+[.,]\d{2})\s*$/i);
+    if (qtyOnly) return;
+
+    if (m1) {
+      desc = m1[1].replace(/[\s.]+$/g, '').replace(/^\d+\s+/, '').trim();
+      amount = parseFloat(m1[2].replace(',', '.'));
+    } else {
+      const nums = line.match(/(\d+[.,]\d{2})/g);
+      if (nums && nums.length) {
+        amount = parseFloat(nums[nums.length - 1].replace(',', '.'));
+        desc = line.replace(nums[nums.length - 1], '').trim();
+      }
     }
-    suggestions.push({ desc, amount, category: cat });
+
+    // Clean description
+    desc = desc.replace(/^\d{8,}\s*/, '').replace(/\s+/g, ' ').trim();
+    if (!desc || desc.length < 2) return;
+    if (!amount || amount <= 0 || amount > 50000) return;
+    // Avoid treating the grand total as an item if already captured
+    if (receiptTotal && Math.abs(amount - receiptTotal) < 0.01 && /total/i.test(line)) return;
+
+    const category = guessCategory(desc, text);
+    suggestions.push({ desc, amount, category });
+  });
+
+  // Deduplicate near-identical lines
+  const seen = new Set();
+  const unique = suggestions.filter(s => {
+    const k = s.desc.toLowerCase() + '|' + s.amount.toFixed(2);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
   });
 
   const box = document.getElementById('parse-suggestions');
-  if (suggestions.length === 0) {
-    box.innerHTML = '<div class="hint">No priced items found. Format like: “Burger 25.00”</div>';
-  } else {
-    box.innerHTML = '<div style="font-weight:600;margin-bottom:6px">Suggested items (tap to use as single transaction):</div>' +
-      suggestions.map((s, i) => `
+  if (unique.length === 0 && !receiptTotal) {
+    box.innerHTML = '<div class="hint">No priced items found. Try a sharper photo or paste text manually.</div>';
+    box.classList.remove('hidden');
+    return;
+  }
+
+  // Prefer item sum; fall back to receipt total
+  const itemsSum = unique.reduce((s, x) => s + x.amount, 0);
+  const mainTotal = receiptTotal || itemsSum;
+  const mainCat = unique[0]?.category || guessCategory(text, text) || 'Food & Dining';
+  const noteItems = unique.map(s => `${s.desc} ${s.amount.toFixed(2)}`).join('; ');
+
+  let html = '';
+  if (mainTotal > 0) {
+    html += `<div style="font-weight:600;margin-bottom:8px">One transaction (recommended)</div>
+      <div class="parse-item">
+        <span><b>${escapeHtml(mainCat)}</b> · Total ${money(mainTotal)}
+          <div class="hint" style="margin:0">${unique.length} items${receiptDate ? ' · ' + receiptDate : ''}</div>
+        </span>
+        <button type="button" onclick="applyReceiptTotal()">Use total</button>
+      </div>`;
+  }
+
+  if (unique.length) {
+    html += `<div style="font-weight:600;margin:12px 0 6px">Or item by item</div>` +
+      unique.map((s, i) => `
         <div class="parse-item">
           <span>${escapeHtml(s.desc)} → <b>${s.category}</b> ${money(s.amount)}</span>
           <button type="button" onclick="applySuggestion(${i})">Use</button>
-        </div>`).join('') +
-      `<div class="hint" style="margin-top:8px">Tip: For multiple items create separate transactions (or keep total and note the items).</div>`;
-    window._parseSuggestions = suggestions;
+        </div>`).join('');
   }
+
+  html += `<div class="hint" style="margin-top:8px">Photo stays attached when you Save. OCR may misread — check amounts.</div>`;
+
+  window._parseSuggestions = unique;
+  window._receiptBundle = {
+    total: mainTotal,
+    category: mainCat,
+    note: noteItems,
+    product: unique.length <= 3 ? unique.map(s => s.desc).join(', ') : `${unique.length} items`,
+    date: receiptDate
+  };
+
+  box.innerHTML = html;
   box.classList.remove('hidden');
+}
+
+document.getElementById('btn-parse-receipt').addEventListener('click', () => {
+  const text = document.getElementById('receipt-text').value.trim();
+  if (!text) { toast('Scan a photo or paste receipt text first'); return; }
+  parseReceiptText(text);
 });
 
 window.applySuggestion = function(idx) {
@@ -1055,15 +1248,42 @@ window.applySuggestion = function(idx) {
   if (!s) return;
   document.getElementById('tx-amount').value = s.amount.toFixed(2);
   document.getElementById('tx-product').value = s.desc;
-  // try set category
   const catSelect = document.getElementById('tx-category');
   const opt = [...catSelect.options].find(o => o.value === s.category);
   if (opt) {
     catSelect.value = s.category;
     updateSubcategories();
     updateFuelFieldVisibility();
+    // Prefer Groceries subcategory if present
+    setTimeout(() => {
+      const sub = document.getElementById('tx-subcategory');
+      const g = [...sub.options].find(o => /grocer/i.test(o.value));
+      if (g) sub.value = g.value;
+    }, 50);
   }
   toast(`Filled: ${s.category} ${money(s.amount)}`, 'success');
+};
+
+window.applyReceiptTotal = function() {
+  const b = window._receiptBundle;
+  if (!b) return;
+  document.getElementById('tx-amount').value = b.total.toFixed(2);
+  document.getElementById('tx-product').value = b.product || '';
+  document.getElementById('tx-note').value = b.note || '';
+  if (b.date) document.getElementById('tx-date').value = b.date;
+  const catSelect = document.getElementById('tx-category');
+  const opt = [...catSelect.options].find(o => o.value === b.category);
+  if (opt) {
+    catSelect.value = b.category;
+    updateSubcategories();
+    updateFuelFieldVisibility();
+    setTimeout(() => {
+      const sub = document.getElementById('tx-subcategory');
+      const g = [...sub.options].find(o => /grocer/i.test(o.value));
+      if (g) sub.value = g.value;
+    }, 50);
+  }
+  toast(`Filled total ${money(b.total)} → ${b.category}`, 'success');
 };
 
 // ---------- File → base64 helper ----------

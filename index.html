@@ -202,21 +202,23 @@
       <div class="fg"><label>Date</label>
         <input type="date" id="tx-date" required></div>
 
-      <!-- BILL / RECEIPT ATTACHMENT -->
+      <!-- BILL / RECEIPT ATTACHMENT + OCR -->
       <div class="fg">
-        <label>📎 Attach Bill / Receipt (optional)</label>
+        <label>📎 Photo of bill / receipt</label>
         <div class="file-row">
-          <input type="file" id="tx-receipt" accept="image/*,.pdf" class="file-input">
+          <input type="file" id="tx-receipt" accept="image/*" capture="environment" class="file-input">
           <span id="receipt-name" class="file-name"></span>
           <button type="button" class="link-btn hidden" id="btn-clear-receipt">Clear</button>
         </div>
         <div id="receipt-preview" class="receipt-preview hidden"></div>
+        <button type="button" class="btn-secondary hidden" id="btn-scan-ocr" style="margin-top:8px">📷 Scan & extract items</button>
+        <p id="ocr-status" class="hint hidden" style="margin-top:6px"></p>
       </div>
 
-      <!-- RECEIPT TEXT PARSER (BONUS) -->
+      <!-- RECEIPT TEXT PARSER -->
       <div class="fg" id="receipt-parse-box">
-        <label>🧾 Paste receipt text (optional – auto-categorize items)</label>
-        <textarea id="receipt-text" rows="3" placeholder="Paste lines from receipt, e.g.&#10;Burger 25.00&#10;Dress 180.00&#10;Coffee 12.50"></textarea>
+        <label>🧾 Receipt text (from scan or paste)</label>
+        <textarea id="receipt-text" rows="4" placeholder="Photo scan fills this automatically, or paste lines:&#10;Mackerel 5.94&#10;Yoghurt 4.75"></textarea>
         <button type="button" class="btn-secondary" id="btn-parse-receipt" style="margin-top:6px">Suggest Categories from Text</button>
         <div id="parse-suggestions" class="parse-suggestions hidden"></div>
       </div>
@@ -369,6 +371,7 @@
     <button class="nav-btn" data-view="settings">⚙️<span>More</span></button>
   </nav>
 </div>
-<script src="app.js?v=8"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>
