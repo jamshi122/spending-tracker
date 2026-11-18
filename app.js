@@ -2,7 +2,7 @@
 // ⚠️ PASTE YOUR URLS HERE
 // ============================================
 const BACKEND_URL = "https://script.google.com/macros/s/AKfycbxhJXudubUWPaHt62mcnx1yl0JpAWJOBv4dszwo6caBJPUiB-dTHzgdTXFCrhvAZC5m/exec"; // ⚠️ PASTE YOUR URL HERE
-const SHEET_URL = "https://docs.google.com/spreadsheets/d/1syWFz8Gx_0yRmREAFBqyrSDCsladhzS5_-RmcIzvJbY/edit?gid=1251417057#gid=1251417057"";         // ⚠️ PASTE YOUR URL HERE
+const SHEET_URL = "https://docs.google.com/spreadsheets/d/1syWFz8Gx_0yRmREAFBqyrSDCsladhzS5_-RmcIzvJbY/edit?gid=1251417057#gid=1251417057";         // ⚠️ PASTE YOUR URL HERE
 const CURRENCY = "QR";
 // ============================================
 
@@ -32,24 +32,32 @@ function money(n) {
   return `${CURRENCY} ${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+async function fetchJSON(url, opts = {}, ms = 30000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const res = await fetch(url, { ...opts, signal: ctrl.signal });
+    return await res.json();
+  } finally { clearTimeout(timer); }
+}
+
+
 async function api(action, payload = {}) {
   try {
-    const res = await fetch(BACKEND_URL, {
+    const json = await fetchJSON(BACKEND_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action, ...payload })
     });
-    const json = await res.json();
     setStatus(json.success);
     return json;
   } catch (e) { setStatus(false); return { success: false, error: e.toString() }; }
 }
 
 async function fetchAll() {
-  if (!BACKEND_URL || BACKEND_URL.includes("PASTE_YOUR")) return;
+  if (!BACKEND_URL || BACKEND_URL.includes("PASTE_YOUR")) return false;
   try {
-    const res = await fetch(BACKEND_URL);
-    const json = await res.json();
+    const json = await fetchJSON(BACKEND_URL);
     if (json.success) {
       state.transactions = (json.data.TX || []).map(normalizeTx);
       state.accounts    = (json.data.ACC || []).map(normalizeAcc);
@@ -60,8 +68,11 @@ async function fetchAll() {
       state.users       = json.data.USER || [];
       state.budgets     = json.data.BUDGET || [];
       setStatus(true);
+      return true;
     }
-  } catch (e) { setStatus(false); }
+    setStatus(false);
+    return false;
+  } catch (e) { setStatus(false); return false; }
 }
 
 function setStatus(online) {
@@ -187,6 +198,7 @@ function renderCashCardBar(expenses) {
   const card = expenses.filter(t => t.cardId).reduce((s, t) => s + t.amount, 0);
   const total = cash + card;
   const el = document.getElementById('cashcard-bar');
+  if (!el) return;
   if (total === 0) { el.innerHTML = '<div class="empty" style="width:100%">No data</div>'; return; }
   const cp = (cash/total)*100, dp = (card/total)*100;
   el.innerHTML = `<div class="cashcard-seg" style="width:${cp}%;background:#34c759">${cp > 15 ? cp.toFixed(0)+'%' : ''}</div><div class="cashcard-seg" style="width:${dp}%;background:#007aff">${dp > 15 ? dp.toFixed(0)+'%' : ''}</div>`;
@@ -770,31 +782,29 @@ document.getElementById('user-switcher').addEventListener('change', (e) => {
 let hasSeeded = false;
 
 async function init() {
-  // 1. Render instantly so screen isn't blank
-  renderUserSwitcher();
-  renderDashboard();
+  // 1. Render instantly so the screen isn't blank (a render error must never stop startup)
+  try { renderUserSwitcher(); renderDashboard(); } catch (err) { console.error("Initial render error:", err); }
 
   // 2. Fetch data safely
   try {
-    await fetchAll();
+    const loaded = await fetchAll();
 
-    // 3. Seed data exactly once if the sheet is empty
-    if (state.users.length === 0 && !hasSeeded) {
+    // 3. Seed once, ONLY if the fetch really succeeded and the sheet is empty
+    if (loaded && state.users.length === 0 && !hasSeeded) {
       hasSeeded = true;
       await api('addUser', { data: { id: 'u1', name: 'Husband', color: '#007aff' } });
       await api('addUser', { data: { id: 'u2', name: 'Wife', color: '#ff2d55' } });
       await api('addAccount', { data: { id: 'acc1', name: 'Husband Bank', type: 'bank', owner: 'u1', balance: 0, currency: 'QAR' } });
       await api('addAccount', { data: { id: 'acc2', name: 'Wife Bank', type: 'bank', owner: 'u2', balance: 0, currency: 'QAR' } });
-      await fetchAll(); // Fetch again to get the new data
+      await fetchAll();
     }
   } catch (err) {
     console.error("Startup Error:", err);
   }
 
   // 4. Final render
-  renderUserSwitcher();
-  renderDashboard();
-  
+  try { renderUserSwitcher(); renderDashboard(); } catch (err) { console.error("Render error:", err); }
+
   // 5. Auto-sync
   setInterval(fetchAll, 60000);
 }

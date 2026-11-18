@@ -1,6 +1,6 @@
 const SHEETS = {
   TX: 'Transactions', ACC: 'Accounts', CARD: 'CreditCards',
-  PAY: 'CardPayments', FUEL: 'FuelLog', CAT: 'Categories', USER: 'Users'
+  PAY: 'CardPayments', FUEL: 'FuelLog', CAT: 'Categories', USER: 'Users', BUDGET: 'Budgets'
 };
 const HEADERS = {
   TX: ['id','date','type','amount','category','subcategory','product',
@@ -11,7 +11,8 @@ const HEADERS = {
   FUEL: ['id','date','cardId','accountId','userId','vehicle',
          'odometer','liters','pricePerLiter','total','fullTank','note'],
   CAT: ['id','name','parentId','type','icon','color','sortOrder'],
-  USER: ['id','name','color']
+  USER: ['id','name','color'],
+  BUDGET: ['id','category','amount','period','userId']
 };
 
 function getOrCreateSheet(name, headers) {
@@ -206,14 +207,25 @@ function seedCategories() {
 }
 
 // ============ API ============
+// Create missing sheets only once (was running on EVERY request = slow)
+function ensureSetup() {
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty('SETUP_V2') === '1') return;
+  setupAllSheets();
+  props.setProperty('SETUP_V2', '1');
+}
+
 function doPost(e) {
+  const lock = LockService.getScriptLock();
   try {
+    lock.waitLock(20000); // stop two saves from corrupting balances
     const body = JSON.parse(e.postData.contents);
     const action = body.action;
-    setupAllSheets();
+    ensureSetup();
 
     if (action === 'addTx')           return addTx(body.data);
-    if (action === 'deleteTx')        return deleteRow(SHEETS.TX, body.id);
+    if (action === 'updateTx')        return updateTx(body.id, body.data);
+    if (action === 'deleteTx')        return deleteTx(body.id);
     if (action === 'addCard')         return addRow(SHEETS.CARD, body.data, HEADERS.CARD);
     if (action === 'addAccount')      return addRow(SHEETS.ACC, body.data, HEADERS.ACC);
     if (action === 'addPayment')      return addPayment(body.data);
@@ -221,22 +233,27 @@ function doPost(e) {
     if (action === 'addUser')         return addRow(SHEETS.USER, body.data, HEADERS.USER);
     if (action === 'addCategory')     return addRow(SHEETS.CAT, body.data, HEADERS.CAT);
     if (action === 'deleteCategory')  return deleteRow(SHEETS.CAT, body.id);
+    if (action === 'saveBudget')      return saveBudget(body.data);
+    if (action === 'deleteBudget')    return deleteRow(SHEETS.BUDGET, body.id);
     if (action === 'rebuildBalances') return rebuildBalances();
     if (action === 'resetCategories') {
       const s = getOrCreateSheet(SHEETS.CAT, HEADERS.CAT);
-      if (s.getLastRow() > 1) s.getRange(2, 1, s.getLastRow(), HEADERS.CAT.length).clearContent();
+      if (s.getLastRow() > 1) s.getRange(2, 1, s.getLastRow() - 1, HEADERS.CAT.length).clearContent();
       seedCategories();
       return json({ success: true });
     }
     return json({ success: false, error: 'unknown action' });
   } catch (err) {
     return json({ success: false, error: err.toString() });
+  } finally {
+    try { lock.releaseLock(); } catch (x) {}
   }
 }
 
 function doGet(e) {
   try {
-    setupAllSheets();
+    ensureSetup();
+    const tz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
     const result = {};
     Object.keys(SHEETS).forEach(k => {
       const sheet = getOrCreateSheet(SHEETS[k], HEADERS[k]);
@@ -244,7 +261,8 @@ function doGet(e) {
       const headers = data[0];
       result[k] = data.slice(1).map(row => {
         const o = {};
-        headers.forEach((h, i) => o[h] = row[i]);
+        // Dates -> plain yyyy-MM-dd so they don't shift a day back
+        headers.forEach((h, i) => o[h] = (row[i] instanceof Date) ? Utilities.formatDate(row[i], tz, 'yyyy-MM-dd') : row[i]);
         return o;
       });
     });
@@ -257,21 +275,17 @@ function doGet(e) {
 // ============ HELPERS ============
 function addRow(sheetName, data, headers) {
   const sheet = getOrCreateSheet(sheetName, headers);
+  // Same id already there (e.g. repeated seeding) -> don't add a duplicate
+  if (data.id !== undefined && sheet.getLastRow() > 1) {
+    const ids = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
+    if (ids.some(r => String(r[0]) === String(data.id))) return json({ success: true, duplicate: true });
+  }
   sheet.appendRow(headers.map(h => data[h] !== undefined ? data[h] : ''));
   return json({ success: true });
 }
 
 function deleteRow(sheetName, id) {
-  const key = Object.keys(SHEETS).find(k => SHEETS[k] === sheetName);
-  const sheet = getOrCreateSheet(sheetName, HEADERS[key]);
-  const data = sheet.getDataRange().getValues();
-  for (let i = 1; i < data.length; i++) {
-    if (String(data[i][0]) === String(id)) {
-      sheet.deleteRow(i + 1);
-      return json({ success: true });
-    }
-  }
-  return json({ success: false, error: 'not found' });
+  return deleteRowSilent(sheetName, id) ? json({ success: true }) : json({ success: false, error: 'not found' });
 }
 
 function adjustBalance(type, id, delta) {
@@ -359,6 +373,71 @@ function rebuildBalances() {
   return json({ success: true });
 }
 
+// Apply (mult=1) or reverse (mult=-1) a transaction's effect on balances
+function applyTxEffect(type, amount, accountId, cardId, mult) {
+  const amt = (parseFloat(amount) || 0) * mult;
+  if (type === 'expense') {
+    if (cardId) adjustBalance('card', cardId, amt);
+    else if (accountId) adjustBalance('acc', accountId, -amt);
+  } else if (type === 'income' && accountId) {
+    adjustBalance('acc', accountId, amt);
+  }
+}
+
+function updateTx(id, d) {
+  const sheet = getOrCreateSheet(SHEETS.TX, HEADERS.TX);
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) !== String(id)) continue;
+    const old = rows[i];
+    applyTxEffect(old[2], old[3], old[8], old[9], -1);
+    const row = [old[0], d.date || old[1], d.type || old[2], d.amount, d.category,
+      d.subcategory || '', d.product || '', d.note || '', d.accountId || '', d.cardId || '',
+      old[10], old[11], old[12]];
+    sheet.getRange(i + 1, 1, 1, row.length).setValues([row]);
+    applyTxEffect(row[2], row[3], row[8], row[9], 1);
+    return json({ success: true });
+  }
+  return json({ success: false, error: 'not found' });
+}
+
+function deleteTx(id) {
+  const sheet = getOrCreateSheet(SHEETS.TX, HEADERS.TX);
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) !== String(id)) continue;
+    const old = rows[i];
+    applyTxEffect(old[2], old[3], old[8], old[9], -1); // give the money back
+    sheet.deleteRow(i + 1);
+    if (old[11]) deleteRowSilent(SHEETS.FUEL, old[11]); // linked fuel log
+    return json({ success: true });
+  }
+  return json({ success: false, error: 'not found' });
+}
+
+function deleteRowSilent(sheetName, id) {
+  const key = Object.keys(SHEETS).find(k => SHEETS[k] === sheetName);
+  const sheet = getOrCreateSheet(sheetName, HEADERS[key]);
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(id)) { sheet.deleteRow(i + 1); return true; }
+  }
+  return false;
+}
+
+function saveBudget(d) {
+  const sheet = getOrCreateSheet(SHEETS.BUDGET, HEADERS.BUDGET);
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (String(rows[i][1]) === String(d.category) && String(rows[i][4] || '') === String(d.userId || '')) {
+      sheet.getRange(i + 1, 3).setValue(parseFloat(d.amount) || 0); // update existing
+      return json({ success: true });
+    }
+  }
+  sheet.appendRow([d.id || Utilities.getUuid(), d.category, parseFloat(d.amount) || 0, d.period || 'monthly', d.userId || '']);
+  return json({ success: true });
+}
+
 function json(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
@@ -374,4 +453,3 @@ function resetCategories() {
   seedCategories();
   SpreadsheetApp.getActive().toast('✅ Categories reset to defaults!');
 }
-

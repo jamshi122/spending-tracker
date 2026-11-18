@@ -6,13 +6,21 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#007aff">
-<title>Spending Tracker</title>
-<link rel="stylesheet" href="style.css">
+<title>Jamshi Solution – Spending Tracker</title>
+<meta name="apple-mobile-web-app-title" content="Jamshi Solution">
+<link rel="icon" type="image/svg+xml" href="logo.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
 <div class="app">
   <header>
-    <h1 id="page-title">Dashboard</h1>
+    <div class="brand">
+      <img src="logo.svg" class="brand-logo" alt="Jamshi Solution">
+      <h1 id="page-title">Dashboard</h1>
+    </div>
     <div class="header-right">
       <select id="user-switcher"><option>Loading...</option></select>
       <span id="status" class="status-dot">●</span>
@@ -41,6 +49,9 @@
       <div id="donut-chart" class="donut-wrap"></div>
       <div id="donut-legend" class="donut-legend"></div>
     </div>
+
+    <h3>Cash vs Card (30d)</h3>
+    <div id="cashcard-bar" class="cashcard-bar"></div>
 
     <h3>Last 6 Months</h3>
     <div class="chart-card">
@@ -190,6 +201,12 @@
   <!-- SETTINGS / ADMIN -->
   <main id="view-settings" class="view">
     <!-- ADMIN PANEL -->
+    <div class="about-brand">
+      <img src="logo.svg" alt="Jamshi Solution">
+      <div class="about-name">Jamshi Solution</div>
+      <div class="about-sub">Spending Tracker</div>
+    </div>
+
     <div class="box" style="border: 2px solid #007aff;">
       <h3>🔐 Admin Panel</h3>
       <p class="hint">Manage users and categories here.</p>
@@ -272,6 +289,6 @@
     <button class="nav-btn" data-view="settings">⚙️<span>More</span></button>
   </nav>
 </div>
-<script src="app.js?v=5"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>
