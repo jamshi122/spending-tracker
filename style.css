@@ -34,3 +34,10 @@
 .sheet-btns button[data-close]{grid-column:1/-1;background:#f1f4f9;color:#667085}
 body.dark .sheet-btns button[data-close]{background:#2b394d;color:#dce5f1}
 body.dark .chip{border-color:#34445b}
+
+.chip.ghost{background:transparent;border-style:dashed;color:var(--blue)}
+.more{border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:6px 0 16px}
+.more summary{cursor:pointer;font-weight:700;font-size:13px;color:var(--blue)}
+.more .field{margin-top:12px;margin-bottom:0}
+.more .check-field{margin-bottom:0}
+#tx-amount{font-size:28px;font-weight:800}

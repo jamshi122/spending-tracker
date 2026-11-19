@@ -241,19 +241,15 @@ document.addEventListener('DOMContentLoaded',()=>{
 });
 
 
-/* Jamshi Solution – UX upgrade (loads AFTER app.js, overrides some functions) */
+/* ===== Jamshi Solution – v2 upgrade layer (overrides earlier functions above) ===== */
 'use strict';
 const UX = {
   icons: {food:'🍽️',grocer:'🛒',fuel:'⛽',transport:'🚗',car:'🚗',bill:'🧾',rent:'🏠',shop:'🛍️',health:'💊',medic:'💊',entertain:'🎬',educat:'🎓',travel:'✈️',family:'👨‍👩‍👧',gift:'🎁',salary:'💼',overtime:'⏱️',bonus:'🎉',mobile:'📱',internet:'🌐',income:'💰',other:'🏷️'},
-  subs: {
-    food:['Restaurant','Coffee','Takeaway'], grocer:['Supermarket','Vegetables','Meat'],
-    fuel:['Petrol','Diesel','Car wash'], transport:['Taxi','Metro','Parking','Maintenance'],
-    bill:['Electricity','Water','Mobile','Internet'], shop:['Clothes','Electronics','Home'],
-    health:['Doctor','Pharmacy'], entertain:['Movies','Games','Outing'], salary:['Basic','Allowance']
-  },
+  subs: {food:['Restaurant','Coffee','Takeaway'],grocer:['Supermarket','Vegetables','Meat'],fuel:['Petrol','Diesel','Car wash'],transport:['Taxi','Metro','Parking','Maintenance'],bill:['Electricity','Water','Mobile','Internet'],shop:['Clothes','Electronics','Home'],health:['Doctor','Pharmacy'],entertain:['Movies','Games','Outing'],salary:['Basic','Allowance']},
   exp: ['Food','Groceries','Fuel','Transport','Bills','Shopping','Health','Entertainment','Family','Other'],
   inc: ['Salary','Overtime','Bonus','Other income']
 };
+const UXS = { catOpen: true, subOpen: true, restored: false };
 
 function catIcon(name) {
   const c = state.categories.find(x => x.name === name);
@@ -263,43 +259,58 @@ function catIcon(name) {
   return UX.icons[k] || '🏷️';
 }
 function subsFor(name) {
-  const n = String(name || '').toLowerCase(), c = state.categories.find(x => x.name === name);
+  const n = String(name || '').toLowerCase(), c = state.categories.find(x => x.name === name && !x.parentId) || state.categories.find(x => x.name === name);
   const own = c ? state.categories.filter(x => x.parentId && (String(x.parentId) === String(c.id) || x.parentId === c.name)).map(x => x.name) : [];
   const k = Object.keys(UX.subs).find(k => n.includes(k));
   return own.length ? own : (UX.subs[k] || []);
 }
 
-/* ---------- Add form: category + subcategory chips ---------- */
+/* ---------- Add form: pickers that collapse after choosing ---------- */
 function uxChips() {
   const sel = $('tx-category'); let box = $('cat-chips');
   if (!box) { box = document.createElement('div'); box.id = 'cat-chips'; box.className = 'chips'; sel.insertAdjacentElement('beforebegin', box); }
-  box.innerHTML = [...sel.options].map(o => `<button type="button" class="chip ${o.value === sel.value ? 'on' : ''}" data-cat="${esc(o.value)}"><span>${catIcon(o.value)}</span>${esc(o.value)}</button>`).join('');
+  const cur = sel.value;
+  if (cur && !UXS.catOpen) {
+    box.innerHTML = `<button type="button" class="chip on" data-cat="${esc(cur)}"><span>${catIcon(cur)}</span>${esc(cur)}</button><button type="button" class="chip ghost" data-change="1">Change</button>`;
+  } else {
+    box.innerHTML = [...sel.options].filter(o => o.value).map(o => `<button type="button" class="chip ${o.value === cur ? 'on' : ''}" data-cat="${esc(o.value)}"><span>${catIcon(o.value)}</span>${esc(o.value)}</button>`).join('');
+  }
 }
 function uxSubs() {
   const inp = $('tx-subcategory'); let box = $('sub-chips');
   if (!box) { box = document.createElement('div'); box.id = 'sub-chips'; box.className = 'chips'; inp.insertAdjacentElement('beforebegin', box); }
-  box.innerHTML = subsFor($('tx-category').value).map(s => `<button type="button" class="chip ${inp.value === s ? 'on' : ''}" data-sub="${esc(s)}">${esc(s)}</button>`).join('');
+  const cat = $('tx-category').value, list = subsFor(cat), cur = inp.value;
+  if (!cat || !list.length) { box.innerHTML = ''; return; }
+  if (cur && !UXS.subOpen) box.innerHTML = `<button type="button" class="chip on" data-subclear="1">${esc(cur)} ✕</button>`;
+  else box.innerHTML = list.map(s => `<button type="button" class="chip ${cur === s ? 'on' : ''}" data-sub="${esc(s)}">${esc(s)}</button>`).join('');
 }
 function uxForm() {
   const sel = $('tx-category'), cur = sel.value, type = $('tx-type').value;
   let names = state.categories.filter(c => !c.parentId && (c.type || 'expense') === type).map(c => c.name);
   if (!names.length) names = type === 'income' ? UX.inc : UX.exp;
-  sel.innerHTML = names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
-  sel.value = names.includes(cur) ? cur : names[0];
+  sel.removeAttribute('required');
+  sel.innerHTML = '<option value="">Select category</option>' + names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  sel.value = names.includes(cur) ? cur : '';
+  if (!sel.value) UXS.catOpen = true;
   sourceFields(); uxChips(); uxSubs();
+}
+function uxRestoreLast() {
+  try {
+    const L = JSON.parse(localStorage.getItem('jamshi-last') || 'null'); if (!L) return;
+    if (L.method) $('tx-method').value = L.method;
+    if (L.acc && [...$('tx-account').options].some(o => o.value === L.acc)) $('tx-account').value = L.acc;
+    if (L.card && [...$('tx-card').options].some(o => o.value === L.card)) $('tx-card').value = L.card;
+    sourceFields();
+  } catch (e) {}
 }
 function resetTxForm() {
   $('tx-form').reset(); $('tx-date').value = today(); $('tx-edit-id').value = ''; state.editId = null;
-  $('tx-method').value = 'account'; $('tx-form-title').textContent = 'New transaction'; uxForm();
+  $('tx-form-title').textContent = 'New transaction';
+  UXS.catOpen = true; UXS.subOpen = true; if ($('ux-more')) $('ux-more').open = false;
+  uxForm(); uxRestoreLast();
 }
-function renderAll() {
-  $('user-label').textContent = `${state.user?.name || ''}${isAdmin() ? ' · Admin' : ''}`;
-  $('admin-only').classList.toggle('hidden', !isAdmin());
-  document.querySelectorAll('.admin-action').forEach(el => el.classList.toggle('hidden', !isAdmin()));
-  renderDashboard(); renderHistory(); renderAccounts(); renderSelects(); renderBudgets(); renderAdmin(); uxForm();
-}
-
 function renderSelects() {
+  const ids = ['tx-account', 'tx-card', 'budget-category', 'payment-card', 'payment-account'], keep = ids.map(i => [i, $(i).value]);
   const parents = state.categories.filter(c => !c.parentId && (!c.type || c.type === 'expense'));
   const accOpts = state.accounts.map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
   $('tx-account').innerHTML = state.accounts.map(a => `<option value="${esc(a.id)}">${esc(a.name)} (${money(a.balance)})</option>`).join('');
@@ -307,15 +318,21 @@ function renderSelects() {
   $('budget-category').innerHTML = parents.map(c => `<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('');
   $('payment-card').innerHTML = state.cards.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
   $('payment-account').innerHTML = accOpts;
+  keep.forEach(([i, v]) => { if (v && [...$(i).options].some(o => o.value === v)) $(i).value = v; });
+}
+function renderAll() {
+  $('user-label').textContent = `${state.user?.name || ''}${isAdmin() ? ' · Admin' : ''}`;
+  $('admin-only').classList.toggle('hidden', !isAdmin());
+  document.querySelectorAll('.admin-action').forEach(el => el.classList.toggle('hidden', !isAdmin()));
+  renderDashboard(); renderHistory(); renderAccounts(); renderSelects(); renderBudgets(); renderAdmin(); uxForm();
+  if (!UXS.restored && state.accounts.length) { uxRestoreLast(); UXS.restored = true; }
 }
 
-/* ---------- Rows with icons, tap to open ---------- */
+/* ---------- Rows & dashboard ---------- */
 function txRow(t) {
   const inc = t.type === 'income';
   return `<div class="tx-row" data-view-tx="${esc(t.id)}"><div class="tx-icon">${catIcon(t.category)}</div><div class="tx-main"><b>${esc(t.category || t.type)}${t.subcategory ? ' · ' + esc(t.subcategory) : ''}</b><small>${esc(String(t.date).slice(0, 10))} · ${esc(t.product || t.note || '')}${t.receiptUrl ? ' · 📎' : ''}</small></div><strong class="${t.type}">${inc ? '+' : '−'}${money(t.amount)}</strong></div>`;
 }
-
-/* ---------- Dashboard ---------- */
 function renderDashboard() {
   const cash = state.accounts.reduce((s, a) => s + num(a.balance), 0);
   const debt = state.cards.reduce((s, c) => s + Math.max(0, num(c.balance)), 0);
@@ -324,14 +341,12 @@ function renderDashboard() {
   const expense = recent.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
   $('net-worth').textContent = money(cash - debt); $('cash-total').textContent = money(cash); $('debt-total').textContent = money(debt);
   $('income-total').textContent = money(income); $('expense-total').textContent = money(expense); $('saved-total').textContent = money(income - expense);
-
   $('dashboard-cards').innerHTML = state.cards.length ? state.cards.map(c => {
     const owed = Math.max(0, num(c.balance)), lim = num(c.limit), avail = Math.max(0, lim - owed);
     const pct = lim > 0 ? Math.min(100, owed / lim * 100) : 0;
     const ow = userName(c.owner), owner = ow === '—' ? (c.owner || '') : ow;
     return `<article class="credit-card" style="--card-color:${esc(c.color || '#334155')}"><div class="card-top"><span>💳 ${esc(c.name)}</span><span>•••• ${esc(c.last4 || '')}</span></div><div class="card-balance ${owed > 0 ? 'liability' : ''}">${owed > 0 ? '−' : ''}${money(owed)}</div><small>You owe · ${esc(owner)}</small><div class="bar"><i style="width:${pct}%"></i></div><div class="card-limit">Available ${money(avail)} of ${money(lim)}</div></article>`;
   }).join('') : '<p class="empty">No credit cards added yet.</p>';
-
   const groups = {}; recent.filter(t => t.type === 'expense').forEach(t => { const k = t.category || 'Other'; groups[k] = (groups[k] || 0) + t.amount; });
   const top = Object.entries(groups).sort((a, b) => b[1] - a[1]).slice(0, 6);
   const ym = today().slice(0, 7), month = {};
@@ -345,7 +360,84 @@ function renderDashboard() {
   $('recent-list').innerHTML = state.transactions.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 8).map(txRow).join('') || '<p class="empty">No transactions yet.</p>';
 }
 
-/* ---------- Bottom sheet instead of prompt() ---------- */
+/* ---------- Fast saving: update the screen first, sync in background ---------- */
+function uxApply(type, amount, accId, cardId, mult) {
+  const a = num(amount) * mult;
+  const acc = id => state.accounts.find(x => x.id === String(id)), card = id => state.cards.find(x => x.id === String(id));
+  if (type === 'expense') {
+    if (cardId) { const c = card(cardId); if (c) c.balance = num(c.balance) + a; }
+    else if (accId) { const x = acc(accId); if (x) x.balance = num(x.balance) - a; }
+  } else if (type === 'income' && accId) { const x = acc(accId); if (x) x.balance = num(x.balance) + a; }
+}
+async function uxSync() {
+  try {
+    const r = await api('getData', { version: null }), d = r.data || {};
+    state.user = r.user; state.version = r.version;
+    state.transactions = (d.TX || []).map(normalizeTx); state.accounts = (d.ACC || []).map(normalizeAccount); state.cards = (d.CARD || []).map(normalizeCard);
+    state.payments = d.PAY || []; state.fuel = d.FUEL || []; state.categories = d.CAT || []; state.users = d.USER || []; state.budgets = d.BUDGET || [];
+    renderAll();
+  } catch (e) { setStatus(false); }
+}
+async function uxUpload(file) {
+  let blob = file, name = file.name || 'receipt.jpg';
+  try {
+    if (String(file.type).startsWith('image/')) {
+      const bmp = await createImageBitmap(file), s = Math.min(1, 1400 / Math.max(bmp.width, bmp.height));
+      const cv = document.createElement('canvas'); cv.width = Math.round(bmp.width * s); cv.height = Math.round(bmp.height * s);
+      cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+      const b = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.72));
+      if (b) { blob = b; name = name.replace(/\.\w+$/, '') + '.jpg'; }
+    }
+  } catch (e) { blob = file; }
+  if (blob.size > 8 * 1024 * 1024) throw new Error('Receipt image must be smaller than 8 MB.');
+  const base64 = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(blob); });
+  const up = await api('uploadReceipt', { data: { base64, mimeType: blob.type || 'application/octet-stream', name } });
+  return up.url || '';
+}
+async function saveTransaction(ev) {
+  ev.preventDefault();
+  const amount = num($('tx-amount').value), type = $('tx-type').value, method = $('tx-method').value;
+  if (amount <= 0) return toast('Enter an amount greater than zero.', 'error');
+  const data = { date: $('tx-date').value, type, amount, category: $('tx-category').value, subcategory: $('tx-subcategory').value, product: $('tx-product').value.trim(), note: $('tx-note').value.trim(), accountId: method === 'account' ? $('tx-account').value : '', cardId: method === 'card' ? $('tx-card').value : '', isPrivate: $('tx-private').checked };
+  if (!data.category) return toast('Choose a category.', 'error');
+  if ((method === 'account' && !data.accountId) || (method === 'card' && !data.cardId)) return toast('Select an account or card.', 'error');
+  const editId = $('tx-edit-id').value, file = $('tx-receipt').files?.[0] || null;
+  const isFuel = !editId && type === 'expense' && data.category.toLowerCase() === 'fuel';
+  const fuel = isFuel ? { vehicle: $('fuel-vehicle').value.trim(), odometer: num($('fuel-odometer').value), liters: num($('fuel-liters').value), pricePerLiter: num($('fuel-price').value), fullTank: $('fuel-full').checked } : null;
+  try { localStorage.setItem('jamshi-last', JSON.stringify({ method, acc: $('tx-account').value, card: $('tx-card').value })); } catch (e) {}
+  const txId = editId || uid();
+  if (editId) {
+    const old = state.transactions.find(t => t.id === editId);
+    if (old) { uxApply(old.type, old.amount, old.accountId, old.cardId, -1); Object.assign(old, normalizeTx({ ...old, ...data })); }
+  } else state.transactions.unshift(normalizeTx({ ...data, id: txId, userId: state.user?.id }));
+  uxApply(type, amount, data.accountId, data.cardId, 1);
+  resetTxForm(); renderAll(); switchView('dashboard'); toast('Saved ✓', 'success');
+  try {
+    if (editId) await api('updateTx', { id: editId, data });
+    else if (isFuel) {
+      let url = '';
+      if (file) { try { url = await uxUpload(file); } catch (e) { toast('Receipt upload failed – saved without it.', 'error'); } }
+      await api('addFuel', { data: { id: uid(), date: data.date, total: amount, ...fuel, accountId: data.accountId, cardId: data.cardId, note: data.note, receiptUrl: url } });
+    } else await api('addTx', { data: { ...data, id: txId } });
+    if (file && !isFuel) {
+      try { const url = await uxUpload(file); await api('updateTx', { id: txId, data: { ...data, receiptUrl: url } }); }
+      catch (e) { toast('Saved, but receipt failed: ' + e.message, 'error'); }
+    }
+  } catch (e) { toast('Not saved: ' + e.message, 'error'); }
+  uxSync();
+}
+async function savePayment(ev) {
+  ev.preventDefault();
+  const data = { id: uid(), date: $('payment-date').value, cardId: $('payment-card').value, accountId: $('payment-account').value, amount: num($('payment-amount').value), note: $('payment-note').value };
+  if (!data.cardId || !data.accountId || data.amount <= 0) return toast('Complete all payment details.', 'error');
+  const c = state.cards.find(x => x.id === String(data.cardId)), a = state.accounts.find(x => x.id === String(data.accountId));
+  if (c) c.balance = num(c.balance) - data.amount; if (a) a.balance = num(a.balance) - data.amount;
+  $('payment-form').reset(); $('payment-date').value = today(); renderAll(); toast('Payment recorded ✓', 'success');
+  try { await api('addPayment', { data }); } catch (e) { toast('Payment not saved: ' + e.message, 'error'); }
+  uxSync();
+}
+
+/* ---------- Bottom sheet ---------- */
 function openTransaction(id) {
   const tx = state.transactions.find(t => t.id === id); if (!tx) return;
   let s = $('sheet'); if (!s) { s = document.createElement('div'); s.id = 'sheet'; document.body.appendChild(s); }
@@ -359,12 +451,13 @@ function openTransaction(id) {
     if (a === 'receipt') return void window.open(tx.receiptUrl, '_blank', 'noopener');
     if (a === 'delete') {
       if (!confirm('Delete this transaction permanently?')) return;
-      close();
-      try { await api('deleteTx', { id }); await loadData(true); toast('Transaction deleted.', 'success'); } catch (err) { toast(err.message, 'error'); }
+      close(); uxApply(tx.type, tx.amount, tx.accountId, tx.cardId, -1);
+      state.transactions = state.transactions.filter(t => t.id !== id); renderAll(); toast('Deleted ✓', 'success');
+      try { await api('deleteTx', { id }); } catch (err) { toast('Not deleted: ' + err.message, 'error'); }
+      uxSync();
     }
     if (a === 'edit') {
-      close();
-      $('tx-edit-id').value = tx.id; $('tx-type').value = tx.type; uxForm();
+      close(); $('tx-edit-id').value = tx.id; $('tx-type').value = tx.type; uxForm();
       const sel = $('tx-category');
       if (![...sel.options].some(o => o.value === tx.category)) sel.insertAdjacentHTML('beforeend', `<option value="${esc(tx.category)}">${esc(tx.category)}</option>`);
       sel.value = tx.category;
@@ -372,12 +465,12 @@ function openTransaction(id) {
       $('tx-subcategory').value = tx.subcategory || ''; $('tx-product').value = tx.product || ''; $('tx-note').value = tx.note || '';
       $('tx-private').checked = tx.isPrivate; $('tx-method').value = tx.cardId ? 'card' : 'account'; sourceFields();
       if (tx.cardId) $('tx-card').value = tx.cardId; else $('tx-account').value = tx.accountId;
-      uxChips(); uxSubs(); $('tx-form-title').textContent = 'Edit transaction'; switchView('add');
+      $('ux-more').open = !!(tx.product || tx.note || tx.receiptUrl || tx.isPrivate);
+      UXS.catOpen = false; UXS.subOpen = !tx.subcategory; uxChips(); uxSubs();
+      $('tx-form-title').textContent = 'Edit transaction'; switchView('add');
     }
   };
 }
-
-/* ---------- Fix confusing card prompt (positive = amount owed) ---------- */
 async function addCard() {
   if (!isAdmin()) return toast('Administrator access required.', 'error');
   const name = prompt('Credit card name:'); if (!name) return;
@@ -390,10 +483,26 @@ async function addCard() {
 /* ---------- Wiring ---------- */
 document.addEventListener('click', e => {
   const c = e.target.closest('[data-cat]');
-  if (c) { $('tx-category').value = c.dataset.cat; $('tx-subcategory').value = ''; sourceFields(); uxChips(); uxSubs(); return; }
+  if (c) {
+    if (!UXS.catOpen && c.dataset.cat === $('tx-category').value) { UXS.catOpen = true; uxChips(); return; }
+    $('tx-category').value = c.dataset.cat; $('tx-subcategory').value = ''; UXS.catOpen = false; UXS.subOpen = true;
+    sourceFields(); uxChips(); uxSubs(); return;
+  }
+  if (e.target.closest('[data-change]')) { UXS.catOpen = true; uxChips(); return; }
   const s = e.target.closest('[data-sub]');
-  if (s) { const i = $('tx-subcategory'); i.value = i.value === s.dataset.sub ? '' : s.dataset.sub; uxSubs(); }
+  if (s) { $('tx-subcategory').value = s.dataset.sub; UXS.subOpen = false; uxSubs(); return; }
+  if (e.target.closest('[data-subclear]')) { $('tx-subcategory').value = ''; UXS.subOpen = true; uxSubs(); }
 });
-$('tx-type').addEventListener('change', uxForm);
-$('tx-subcategory').addEventListener('input', uxSubs);
+(function arrangeForm() {
+  const form = $('tx-form'), amountField = $('tx-amount').closest('.field');
+  form.insertBefore(amountField, form.firstChild);
+  $('tx-amount').setAttribute('inputmode', 'decimal');
+  const det = document.createElement('details'); det.className = 'more'; det.id = 'ux-more';
+  det.innerHTML = '<summary>➕ More details (product, note, receipt, private)</summary>';
+  ['tx-product', 'tx-note', 'tx-receipt'].forEach(i => det.appendChild($(i).closest('.field')));
+  det.appendChild($('tx-private').closest('label'));
+  $('fuel-extra').after(det);
+})();
+$('tx-type').addEventListener('change', () => { UXS.catOpen = true; $('tx-subcategory').value = ''; uxForm(); });
+$('tx-subcategory').addEventListener('input', () => { UXS.subOpen = true; uxSubs(); });
 uxForm();
