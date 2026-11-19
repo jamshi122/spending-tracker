@@ -506,3 +506,15 @@ document.addEventListener('click', e => {
 $('tx-type').addEventListener('change', () => { UXS.catOpen = true; $('tx-subcategory').value = ''; uxForm(); });
 $('tx-subcategory').addEventListener('input', () => { UXS.subOpen = true; uxSubs(); });
 uxForm();
+
+/* ---------- Update app button (refreshes cached files, then reloads) ---------- */
+async function uxUpdateApp() {
+  toast('Updating app…');
+  try {
+    const files = ['./', ...[...document.querySelectorAll('link[rel=stylesheet][href],script[src]')].map(e => e.getAttribute('href') || e.getAttribute('src')).filter(u => u && !/^https?:/.test(u))];
+    await Promise.all(files.map(u => fetch(u, { cache: 'reload' }).catch(() => null)));
+    if (window.caches) { const keys = await caches.keys(); await Promise.all(keys.map(k => caches.delete(k))); }
+  } catch (e) {}
+  location.reload();
+}
+$('btn-update').addEventListener('click', uxUpdateApp);
