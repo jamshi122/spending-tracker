@@ -239,3 +239,161 @@ document.addEventListener('DOMContentLoaded',()=>{
   if(window.google?.accounts?.oauth2) initGoogleIdentity();
   else window.addEventListener('load',initGoogleIdentity,{once:true});
 });
+
+
+/* Jamshi Solution – UX upgrade (loads AFTER app.js, overrides some functions) */
+'use strict';
+const UX = {
+  icons: {food:'🍽️',grocer:'🛒',fuel:'⛽',transport:'🚗',car:'🚗',bill:'🧾',rent:'🏠',shop:'🛍️',health:'💊',medic:'💊',entertain:'🎬',educat:'🎓',travel:'✈️',family:'👨‍👩‍👧',gift:'🎁',salary:'💼',overtime:'⏱️',bonus:'🎉',mobile:'📱',internet:'🌐',income:'💰',other:'🏷️'},
+  subs: {
+    food:['Restaurant','Coffee','Takeaway'], grocer:['Supermarket','Vegetables','Meat'],
+    fuel:['Petrol','Diesel','Car wash'], transport:['Taxi','Metro','Parking','Maintenance'],
+    bill:['Electricity','Water','Mobile','Internet'], shop:['Clothes','Electronics','Home'],
+    health:['Doctor','Pharmacy'], entertain:['Movies','Games','Outing'], salary:['Basic','Allowance']
+  },
+  exp: ['Food','Groceries','Fuel','Transport','Bills','Shopping','Health','Entertainment','Family','Other'],
+  inc: ['Salary','Overtime','Bonus','Other income']
+};
+
+function catIcon(name) {
+  const c = state.categories.find(x => x.name === name);
+  if (c && c.icon && c.icon !== '•') return c.icon;
+  const n = String(name || '').toLowerCase();
+  const k = Object.keys(UX.icons).find(k => n.includes(k));
+  return UX.icons[k] || '🏷️';
+}
+function subsFor(name) {
+  const n = String(name || '').toLowerCase(), c = state.categories.find(x => x.name === name);
+  const own = c ? state.categories.filter(x => x.parentId && (String(x.parentId) === String(c.id) || x.parentId === c.name)).map(x => x.name) : [];
+  const k = Object.keys(UX.subs).find(k => n.includes(k));
+  return own.length ? own : (UX.subs[k] || []);
+}
+
+/* ---------- Add form: category + subcategory chips ---------- */
+function uxChips() {
+  const sel = $('tx-category'); let box = $('cat-chips');
+  if (!box) { box = document.createElement('div'); box.id = 'cat-chips'; box.className = 'chips'; sel.insertAdjacentElement('beforebegin', box); }
+  box.innerHTML = [...sel.options].map(o => `<button type="button" class="chip ${o.value === sel.value ? 'on' : ''}" data-cat="${esc(o.value)}"><span>${catIcon(o.value)}</span>${esc(o.value)}</button>`).join('');
+}
+function uxSubs() {
+  const inp = $('tx-subcategory'); let box = $('sub-chips');
+  if (!box) { box = document.createElement('div'); box.id = 'sub-chips'; box.className = 'chips'; inp.insertAdjacentElement('beforebegin', box); }
+  box.innerHTML = subsFor($('tx-category').value).map(s => `<button type="button" class="chip ${inp.value === s ? 'on' : ''}" data-sub="${esc(s)}">${esc(s)}</button>`).join('');
+}
+function uxForm() {
+  const sel = $('tx-category'), cur = sel.value, type = $('tx-type').value;
+  let names = state.categories.filter(c => !c.parentId && (c.type || 'expense') === type).map(c => c.name);
+  if (!names.length) names = type === 'income' ? UX.inc : UX.exp;
+  sel.innerHTML = names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  sel.value = names.includes(cur) ? cur : names[0];
+  sourceFields(); uxChips(); uxSubs();
+}
+function resetTxForm() {
+  $('tx-form').reset(); $('tx-date').value = today(); $('tx-edit-id').value = ''; state.editId = null;
+  $('tx-method').value = 'account'; $('tx-form-title').textContent = 'New transaction'; uxForm();
+}
+function renderAll() {
+  $('user-label').textContent = `${state.user?.name || ''}${isAdmin() ? ' · Admin' : ''}`;
+  $('admin-only').classList.toggle('hidden', !isAdmin());
+  document.querySelectorAll('.admin-action').forEach(el => el.classList.toggle('hidden', !isAdmin()));
+  renderDashboard(); renderHistory(); renderAccounts(); renderSelects(); renderBudgets(); renderAdmin(); uxForm();
+}
+
+function renderSelects() {
+  const parents = state.categories.filter(c => !c.parentId && (!c.type || c.type === 'expense'));
+  const accOpts = state.accounts.map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
+  $('tx-account').innerHTML = state.accounts.map(a => `<option value="${esc(a.id)}">${esc(a.name)} (${money(a.balance)})</option>`).join('');
+  $('tx-card').innerHTML = state.cards.map(c => `<option value="${esc(c.id)}">${esc(c.name)} (•••• ${esc(c.last4 || '')})</option>`).join('');
+  $('budget-category').innerHTML = parents.map(c => `<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('');
+  $('payment-card').innerHTML = state.cards.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
+  $('payment-account').innerHTML = accOpts;
+}
+
+/* ---------- Rows with icons, tap to open ---------- */
+function txRow(t) {
+  const inc = t.type === 'income';
+  return `<div class="tx-row" data-view-tx="${esc(t.id)}"><div class="tx-icon">${catIcon(t.category)}</div><div class="tx-main"><b>${esc(t.category || t.type)}${t.subcategory ? ' · ' + esc(t.subcategory) : ''}</b><small>${esc(String(t.date).slice(0, 10))} · ${esc(t.product || t.note || '')}${t.receiptUrl ? ' · 📎' : ''}</small></div><strong class="${t.type}">${inc ? '+' : '−'}${money(t.amount)}</strong></div>`;
+}
+
+/* ---------- Dashboard ---------- */
+function renderDashboard() {
+  const cash = state.accounts.reduce((s, a) => s + num(a.balance), 0);
+  const debt = state.cards.reduce((s, c) => s + Math.max(0, num(c.balance)), 0);
+  const recent = last30();
+  const income = recent.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+  const expense = recent.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+  $('net-worth').textContent = money(cash - debt); $('cash-total').textContent = money(cash); $('debt-total').textContent = money(debt);
+  $('income-total').textContent = money(income); $('expense-total').textContent = money(expense); $('saved-total').textContent = money(income - expense);
+
+  $('dashboard-cards').innerHTML = state.cards.length ? state.cards.map(c => {
+    const owed = Math.max(0, num(c.balance)), lim = num(c.limit), avail = Math.max(0, lim - owed);
+    const pct = lim > 0 ? Math.min(100, owed / lim * 100) : 0;
+    const ow = userName(c.owner), owner = ow === '—' ? (c.owner || '') : ow;
+    return `<article class="credit-card" style="--card-color:${esc(c.color || '#334155')}"><div class="card-top"><span>💳 ${esc(c.name)}</span><span>•••• ${esc(c.last4 || '')}</span></div><div class="card-balance ${owed > 0 ? 'liability' : ''}">${owed > 0 ? '−' : ''}${money(owed)}</div><small>You owe · ${esc(owner)}</small><div class="bar"><i style="width:${pct}%"></i></div><div class="card-limit">Available ${money(avail)} of ${money(lim)}</div></article>`;
+  }).join('') : '<p class="empty">No credit cards added yet.</p>';
+
+  const groups = {}; recent.filter(t => t.type === 'expense').forEach(t => { const k = t.category || 'Other'; groups[k] = (groups[k] || 0) + t.amount; });
+  const top = Object.entries(groups).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  const ym = today().slice(0, 7), month = {};
+  state.transactions.filter(t => t.type === 'expense' && String(t.date).startsWith(ym)).forEach(t => { month[t.category] = (month[t.category] || 0) + t.amount; });
+  const rows = top.map(([k, v]) => `<div class="summary-row"><span>${catIcon(k)} ${esc(k)}</span><b>${money(v)}</b></div>`).join('');
+  const buds = state.budgets.map(b => {
+    const sp = month[b.category] || 0, amt = num(b.amount), pct = amt > 0 ? Math.min(100, sp / amt * 100) : 0;
+    return `<div class="bud"><div class="summary-row"><span>${catIcon(b.category)} ${esc(b.category)} budget</span><b>${money(sp)} / ${money(amt)}</b></div><div class="bar ${sp > amt ? 'over' : ''}"><i style="width:${pct}%"></i></div></div>`;
+  }).join('');
+  $('category-summary').innerHTML = (rows || '<p class="empty">No expenses in the last 30 days.</p>') + (buds ? '<h3 class="mini-title">Budgets this month</h3>' + buds : '');
+  $('recent-list').innerHTML = state.transactions.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 8).map(txRow).join('') || '<p class="empty">No transactions yet.</p>';
+}
+
+/* ---------- Bottom sheet instead of prompt() ---------- */
+function openTransaction(id) {
+  const tx = state.transactions.find(t => t.id === id); if (!tx) return;
+  let s = $('sheet'); if (!s) { s = document.createElement('div'); s.id = 'sheet'; document.body.appendChild(s); }
+  const can = canEdit(tx), inc = tx.type === 'income';
+  s.innerHTML = `<div class="sheet-bg" data-close></div><div class="sheet-box"><div class="sheet-ic">${catIcon(tx.category)}</div><h3>${esc(tx.category)}${tx.subcategory ? ' · ' + esc(tx.subcategory) : ''}</h3><div class="sheet-amt ${tx.type}">${inc ? '+' : '−'}${money(tx.amount)}</div><p>${esc(String(tx.date).slice(0, 10))}<br>${esc(tx.product || tx.note || '')}</p><div class="sheet-btns">${tx.receiptUrl ? '<button data-act="receipt">📎 Receipt</button>' : ''}${can ? '<button data-act="edit">✏️ Edit</button><button class="del" data-act="delete">🗑️ Delete</button>' : ''}<button data-close>Close</button></div></div>`;
+  s.className = 'open';
+  const close = () => { s.className = ''; };
+  s.onclick = async e => {
+    if (e.target.closest('[data-close]')) return close();
+    const a = e.target.closest('[data-act]')?.dataset.act; if (!a) return;
+    if (a === 'receipt') return void window.open(tx.receiptUrl, '_blank', 'noopener');
+    if (a === 'delete') {
+      if (!confirm('Delete this transaction permanently?')) return;
+      close();
+      try { await api('deleteTx', { id }); await loadData(true); toast('Transaction deleted.', 'success'); } catch (err) { toast(err.message, 'error'); }
+    }
+    if (a === 'edit') {
+      close();
+      $('tx-edit-id').value = tx.id; $('tx-type').value = tx.type; uxForm();
+      const sel = $('tx-category');
+      if (![...sel.options].some(o => o.value === tx.category)) sel.insertAdjacentHTML('beforeend', `<option value="${esc(tx.category)}">${esc(tx.category)}</option>`);
+      sel.value = tx.category;
+      $('tx-date').value = String(tx.date).slice(0, 10); $('tx-amount').value = tx.amount;
+      $('tx-subcategory').value = tx.subcategory || ''; $('tx-product').value = tx.product || ''; $('tx-note').value = tx.note || '';
+      $('tx-private').checked = tx.isPrivate; $('tx-method').value = tx.cardId ? 'card' : 'account'; sourceFields();
+      if (tx.cardId) $('tx-card').value = tx.cardId; else $('tx-account').value = tx.accountId;
+      uxChips(); uxSubs(); $('tx-form-title').textContent = 'Edit transaction'; switchView('add');
+    }
+  };
+}
+
+/* ---------- Fix confusing card prompt (positive = amount owed) ---------- */
+async function addCard() {
+  if (!isAdmin()) return toast('Administrator access required.', 'error');
+  const name = prompt('Credit card name:'); if (!name) return;
+  const last4 = (prompt('Last 4 digits (optional):') || '').slice(-4), limit = Number(prompt('Credit limit (QR):', '0'));
+  const balance = Number(prompt('Amount currently OWED on the card (QR, positive number):', '0'));
+  if (!Number.isFinite(limit) || !Number.isFinite(balance)) return toast('Invalid card values.', 'error');
+  try { await api('addCard', { data: { id: uid(), name, last4, owner: state.user.id || state.user.name, limit, balance: Math.abs(balance), dueDay: 15, color: '#334155' } }); await loadData(true); toast('Credit card added.', 'success'); } catch (e) { toast(e.message, 'error'); }
+}
+
+/* ---------- Wiring ---------- */
+document.addEventListener('click', e => {
+  const c = e.target.closest('[data-cat]');
+  if (c) { $('tx-category').value = c.dataset.cat; $('tx-subcategory').value = ''; sourceFields(); uxChips(); uxSubs(); return; }
+  const s = e.target.closest('[data-sub]');
+  if (s) { const i = $('tx-subcategory'); i.value = i.value === s.dataset.sub ? '' : s.dataset.sub; uxSubs(); }
+});
+$('tx-type').addEventListener('change', uxForm);
+$('tx-subcategory').addEventListener('input', uxSubs);
+uxForm();
