@@ -249,6 +249,7 @@ const UX = {
   exp: ['Food','Groceries','Fuel','Transport','Bills','Shopping','Health','Entertainment','Family','Other'],
   inc: ['Salary','Overtime','Bonus','Other income']
 };
+UX.icons = { loan: '🤝', ...UX.icons };
 const UXS = { catOpen: true, subOpen: true, restored: false };
 
 function catIcon(name) {
@@ -324,7 +325,7 @@ function renderAll() {
   $('user-label').textContent = `${state.user?.name || ''}${isAdmin() ? ' · Admin' : ''}`;
   $('admin-only').classList.toggle('hidden', !isAdmin());
   document.querySelectorAll('.admin-action').forEach(el => el.classList.toggle('hidden', !isAdmin()));
-  renderDashboard(); renderHistory(); renderAccounts(); renderSelects(); renderBudgets(); renderAdmin(); uxForm();
+  renderDashboard(); renderHistory(); renderAccounts(); renderLoans(); renderSelects(); renderBudgets(); renderAdmin(); uxForm();
   if (!UXS.restored && state.accounts.length) { uxRestoreLast(); UXS.restored = true; }
 }
 
@@ -336,10 +337,13 @@ function txRow(t) {
 function renderDashboard() {
   const cash = state.accounts.reduce((s, a) => s + num(a.balance), 0);
   const debt = state.cards.reduce((s, c) => s + Math.max(0, num(c.balance)), 0);
-  const recent = last30();
+  const recent = last30().filter(t => !isLoanTx(t));
+  const LS = uxLoans(), loanOwe = LS.owe.reduce((s, p) => s + Math.max(0, p.total), 0), loanLent = LS.lent.reduce((s, p) => s + Math.max(0, p.total), 0);
   const income = recent.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
   const expense = recent.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
-  $('net-worth').textContent = money(cash - debt); $('cash-total').textContent = money(cash); $('debt-total').textContent = money(debt);
+  $('net-worth').textContent = money(cash - debt - loanOwe + loanLent);
+  let ls = $('loan-stat'); if (!ls) { ls = document.createElement('span'); ls.id = 'loan-stat'; document.querySelector('.hero-stats').appendChild(ls); }
+  ls.innerHTML = `Loans (net) <b>${loanLent - loanOwe < 0 ? '−' : ''}${money(Math.abs(loanLent - loanOwe))}</b>`; $('cash-total').textContent = money(cash); $('debt-total').textContent = money(debt);
   $('income-total').textContent = money(income); $('expense-total').textContent = money(expense); $('saved-total').textContent = money(income - expense);
   $('dashboard-cards').innerHTML = state.cards.length ? state.cards.map(c => {
     const owed = Math.max(0, num(c.balance)), lim = num(c.limit), avail = Math.max(0, lim - owed);
@@ -518,3 +522,118 @@ async function uxUpdateApp() {
   location.reload();
 }
 $('btn-update').addEventListener('click', uxUpdateApp);
+
+/* ---------- Stay signed in (no forced consent screen, remember session) ---------- */
+const AUTH_KEY = 'jamshi-auth';
+function uxSaveAuth() { try { localStorage.setItem(AUTH_KEY, JSON.stringify({ t: state.accessToken, e: state.tokenExpiry })); } catch (e) {} }
+function initGoogleIdentity() {
+  if (!window.google?.accounts?.oauth2) { $('login-message').textContent = 'Google sign-in is loading. Refresh this page in a moment.'; return; }
+  state.tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: GOOGLE_CLIENT_ID,
+    scope: 'openid email profile',
+    callback: async r => {
+      if (r.error || !r.access_token) { showGate('Google sign-in was not completed. Please try again.'); return; }
+      state.accessToken = r.access_token;
+      state.tokenExpiry = Date.now() + (Number(r.expires_in || 3600) - 60) * 1000;
+      uxSaveAuth(); await loadData(true);
+    }
+  });
+}
+function signIn() {
+  if (!state.tokenClient) initGoogleIdentity();
+  if (!state.tokenClient) { toast('Google sign-in is not ready. Refresh the page.', 'error'); return; }
+  state.tokenClient.requestAccessToken({ prompt: '' });
+}
+function signOut() {
+  try { localStorage.removeItem(AUTH_KEY); } catch (e) {}
+  state.accessToken = null; state.user = null; state.version = null; showGate('You have signed out. Sign in to continue.');
+}
+document.addEventListener('DOMContentLoaded', () => {
+  try {
+    const a = JSON.parse(localStorage.getItem(AUTH_KEY) || 'null');
+    if (a && a.t && a.e > Date.now()) { state.accessToken = a.t; state.tokenExpiry = a.e; showApp(); loadData(true); }
+  } catch (e) {}
+});
+
+
+/* ---------- Loans: borrowed & lent money (stored as normal transactions, so it syncs & updates balances) ---------- */
+function isLoanTx(t) { return /^Loan (Borrowed|Repayment|Given|Received Back)$/.test(t.category); }
+function daysBetween(a, b) { return Math.max(0, (new Date(String(b).slice(0, 10)) - new Date(String(a).slice(0, 10))) / 864e5); }
+function uxLoans() {
+  const people = {}, res = { owe: [], lent: [] };
+  state.transactions.filter(isLoanTx).forEach(t => {
+    const dir = (t.category === 'Loan Borrowed' || t.category === 'Loan Repayment') ? 'borrow' : 'lend', name = t.subcategory || 'Unknown', k = dir + '|' + name;
+    (people[k] = people[k] || { dir, name, ev: [] }).ev.push(t);
+  });
+  Object.values(people).forEach(p => {
+    const ev = p.ev.slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    const lots = []; let principal = 0, repaid = 0, interest = 0, over = 0;
+    ev.forEach(t => {
+      if (t.category === 'Loan Borrowed' || t.category === 'Loan Given') {
+        const m = /([\d.]+)\s*%/.exec(t.product || '');
+        lots.push({ rem: t.amount, rate: m ? parseFloat(m[1]) : 0, date: t.date }); principal += t.amount;
+      } else {
+        repaid += t.amount; let a = t.amount;
+        while (a > 0 && lots.length) {
+          const l = lots[0], pay = Math.min(a, l.rem);
+          interest += pay * l.rate / 100 * daysBetween(l.date, t.date) / 365; l.rem -= pay; a -= pay;
+          if (l.rem <= 0.005) lots.shift();
+        }
+        over += a;
+      }
+    });
+    lots.forEach(l => { interest += l.rem * l.rate / 100 * daysBetween(l.date, today()) / 365; });
+    p.principal = principal; p.repaid = repaid; p.interest = interest;
+    p.outstanding = lots.reduce((s, l) => s + l.rem, 0); p.total = p.outstanding + interest - over; p.ev = ev.reverse();
+    (p.dir === 'borrow' ? res.owe : res.lent).push(p);
+  });
+  return res;
+}
+function uxSheet(html, handler) {
+  let s = $('sheet'); if (!s) { s = document.createElement('div'); s.id = 'sheet'; document.body.appendChild(s); }
+  s.innerHTML = `<div class="sheet-bg" data-close></div><div class="sheet-box">${html}</div>`; s.className = 'open';
+  const close = () => { s.className = ''; };
+  s.onclick = e => { if (e.target.closest('[data-close]')) return close(); if (handler) handler(e, close); };
+}
+function renderLoans() {
+  let box = $('loans-box');
+  if (!box) {
+    box = document.createElement('div'); box.id = 'loans-box'; $('view-accounts').appendChild(box);
+    box.addEventListener('click', e => {
+      const b = e.target.closest('[data-loan]'); if (b) return uxLoanForm(b.dataset.loan);
+      const p = e.target.closest('[data-person]'); if (p) uxLoanDetail(p.dataset.person);
+    });
+  }
+  const L = uxLoans(), sum = a => a.reduce((s, p) => s + Math.max(0, p.total), 0);
+  const rows = [...L.owe, ...L.lent].sort((a, b) => b.total - a.total).map(p => {
+    const b = p.dir === 'borrow', settled = p.total < 0.005;
+    return `<div class="account-row" data-person="${esc(p.dir + '|' + p.name)}"><div><b>${b ? '⬇️' : '⬆️'} ${esc(p.name)}</b><small>${b ? 'Borrowed' : 'Lent'} ${money(p.principal)} · ${b ? 'Repaid' : 'Received'} ${money(p.repaid)}${p.interest > 0.005 ? ' · Interest ' + money(p.interest) : ''}</small></div><strong class="${settled ? '' : (b ? 'neg' : 'pos')}">${settled ? '✅ Settled' : money(p.total)}</strong></div>`;
+  }).join('');
+  box.innerHTML = `<div class="section-heading"><h2>🤝 Loans</h2></div><div class="loan-sum"><div><small>You owe</small><b class="neg">${money(sum(L.owe))}</b></div><div><small>Owed to you</small><b class="pos">${money(sum(L.lent))}</b></div></div><div class="loan-btns"><button class="secondary" data-loan="borrow">＋ Borrowed money</button><button class="secondary" data-loan="lend">＋ Lent money</button></div><section class="panel">${rows || '<p class="empty">No loans yet. Tap a button above to add one.</p>'}</section>`;
+}
+function uxLoanDetail(key) {
+  const L = uxLoans(), p = [...L.owe, ...L.lent].find(x => x.dir + '|' + x.name === key); if (!p) return;
+  const b = p.dir === 'borrow';
+  const hist = p.ev.map(t => { const start = t.category === 'Loan Borrowed' || t.category === 'Loan Given'; return `<div class="lh"><span>${start ? (b ? 'Borrowed' : 'Lent') : (b ? 'Repaid' : 'Received back')}<small>${esc(String(t.date).slice(0, 10))}${t.product ? ' · ' + esc(t.product) : ''}${t.note ? ' · ' + esc(t.note) : ''}</small></span><b>${money(t.amount)}</b></div>`; }).join('');
+  uxSheet(`<div class="sheet-ic">${b ? '⬇️' : '⬆️'}</div><h3>${esc(p.name)}</h3><div class="sheet-amt ${b ? 'expense' : 'income'}">${money(Math.max(0, p.total))}</div><p>${b ? 'You owe' : 'Owes you'} · principal left ${money(p.outstanding)}${p.interest > 0.005 ? ' + interest ' + money(p.interest) + ' (estimate)' : ''}</p><div class="sheet-btns"><button data-do="${b ? 'repay' : 'recv'}">${b ? '💸 Repay' : '💰 Received back'}</button><button data-do="${b ? 'borrow' : 'lend'}">${b ? '＋ Borrow more' : '＋ Lend more'}</button><button data-close>Close</button></div><h4 class="mini-title">History</h4>${hist}`,
+    (e, close) => { const d = e.target.closest('[data-do]')?.dataset.do; if (d) { close(); uxLoanForm(d, p.name); } });
+}
+function uxLoanForm(mode, name = '') {
+  if (!state.accounts.length) return toast('Add a cash/bank account first.', 'error');
+  const M = { borrow: ['Borrowed money', 'income', 'Loan Borrowed'], repay: ['Repay loan', 'expense', 'Loan Repayment'], lend: ['Lent money', 'expense', 'Loan Given'], recv: ['Money received back', 'income', 'Loan Received Back'] }[mode];
+  const dir = (mode === 'borrow' || mode === 'repay') ? 'borrow' : 'lend', withRate = mode === 'borrow' || mode === 'lend';
+  const L = uxLoans(), names = (dir === 'borrow' ? L.owe : L.lent).map(p => `<option value="${esc(p.name)}">`).join('');
+  uxSheet(`<h3>${M[0]}</h3><div class="lf"><label>Person</label><input id="lf-name" list="lf-names" value="${esc(name)}" placeholder="Name"><datalist id="lf-names">${names}</datalist></div><div class="lf"><label>Amount (QR)</label><input id="lf-amt" type="number" inputmode="decimal" step="0.01" min="0.01" placeholder="0.00"></div><div class="lf"><label>Date</label><input id="lf-date" type="date" value="${today()}"></div><div class="lf"><label>${M[1] === 'income' ? 'Money goes into' : 'Paid from'}</label><select id="lf-acc">${state.accounts.map(a => `<option value="${esc(a.id)}">${esc(a.name)} (${money(a.balance)})</option>`).join('')}</select></div>${withRate ? '<div class="lf"><label>Interest % per year (optional)</label><input id="lf-rate" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0"></div>' : ''}<div class="lf"><label>Note (optional)</label><input id="lf-note"></div><div class="sheet-btns"><button data-save="1" class="save-btn">Save</button><button data-close>Cancel</button></div>`,
+    async (e, close) => {
+      if (!e.target.closest('[data-save]')) return;
+      const nm = $('lf-name').value.trim(), amt = num($('lf-amt').value), acc = $('lf-acc').value, rate = withRate ? num($('lf-rate').value) : 0;
+      if (!nm) return toast("Enter the person's name.", 'error');
+      if (amt <= 0) return toast('Enter an amount greater than zero.', 'error');
+      const data = { date: $('lf-date').value || today(), type: M[1], amount: amt, category: M[2], subcategory: nm, product: rate > 0 ? rate + '% p.a.' : '', note: $('lf-note').value.trim(), accountId: acc, cardId: '', isPrivate: false };
+      close(); const id = uid();
+      state.transactions.unshift(normalizeTx({ ...data, id, userId: state.user?.id })); uxApply(data.type, amt, acc, '', 1);
+      renderAll(); toast('Saved ✓', 'success');
+      try { await api('addTx', { data: { ...data, id } }); } catch (err) { toast('Not saved: ' + err.message, 'error'); }
+      uxSync();
+    });
+}

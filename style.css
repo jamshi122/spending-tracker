@@ -41,3 +41,16 @@ body.dark .chip{border-color:#34445b}
 .more .field{margin-top:12px;margin-bottom:0}
 .more .check-field{margin-bottom:0}
 #tx-amount{font-size:28px;font-weight:800}
+.loan-sum,.loan-btns{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.loan-sum div{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px}
+.loan-sum small{display:block;color:var(--muted);font-size:11px;margin-bottom:6px}
+.loan-sum b{font-size:19px}
+.neg{color:#dc4c4c}.pos{color:#15945a}
+.sheet-box{max-height:88vh;overflow:auto}
+.lf{display:flex;flex-direction:column;gap:6px;margin-bottom:12px;text-align:left}
+.lf label{font-size:12px;font-weight:700;color:var(--muted)}
+.lf input,.lf select{width:100%;border:1px solid #dce3ed;border-radius:10px;padding:12px;background:var(--panel);color:inherit}
+.sheet-btns .save-btn{grid-column:1/-1;background:var(--blue);color:#fff}
+.lh{display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:9px 0;border-bottom:1px solid var(--line);text-align:left}
+.lh small{display:block;color:var(--muted);font-size:11px;margin-top:3px}
+#loans-box .account-row{cursor:pointer}
