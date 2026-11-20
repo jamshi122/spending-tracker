@@ -509,7 +509,6 @@ document.addEventListener('click', e => {
 })();
 $('tx-type').addEventListener('change', () => { UXS.catOpen = true; $('tx-subcategory').value = ''; uxForm(); });
 $('tx-subcategory').addEventListener('input', () => { UXS.subOpen = true; uxSubs(); });
-uxForm();
 
 /* ---------- Update app button (refreshes cached files, then reloads) ---------- */
 async function uxUpdateApp() {
@@ -637,3 +636,171 @@ function uxLoanForm(mode, name = '') {
       uxSync();
     });
 }
+
+/* ===== Big built-in category catalog (emoji) + add your own + full History ===== */
+const UXRAW = {
+  expense: [
+    'Food & Dining 🍔|Groceries 🛒;Restaurants 🍽️;Fast Food 🍟;Coffee ☕;Tea 🍵;Delivery 🛵;Bakery 🥖;Snacks 🍿;Juice & Drinks 🧃;Water 💧;Fruits 🍎;Vegetables 🥦;Meat & Fish 🥩;Dairy & Eggs 🥛;Rice & Grains 🌾;Sweets & Dessert 🍰;Office Lunch 🍱',
+    'Fuel ⛽|Petrol ⛽;Diesel 🛢️;Premium Fuel 🌟;Car Wash 🚿',
+    'Transportation 🚗|Public Transit 🚇;Taxi / Uber / Careem 🚕;Parking 🅿️;Car Maintenance 🔧;Car Insurance 🛡️;Car Registration 📋;Traffic Fines 🚨;Tolls 🛣️;Tyres 🛞;Oil Change 🛢️;Car Battery 🔋;Car Accessories 🚘',
+    'Housing 🏠|Rent 🔑;Electricity ⚡;Water 💧;Internet 📶;Phone Bill 📞;Maintenance 🔨;Home Goods 🛋️;Furniture 🪑;Cleaning Supplies 🧽;Gas Cylinder 🔥;AC Service ❄️;Plumbing 🚰;Electrician 💡;Laundry 🧺;Security Deposit 🔐',
+    'Shopping 🛍️|Clothing 👕;Shoes 👟;Electronics 💻;Mobile & Gadgets 📱;Accessories ⌚;Books 📖;Gifts 🎁;Sports Equipment ⚽;Online Shopping 📦;Perfume 🌸;Bags 👜;Stationery ✏️;Kitchenware 🍳;Jewellery 💍',
+    'Entertainment 🎬|Movies 🎥;Streaming 📺;Games 🎮;Events 🎟️;Hobbies 🎨;Malls / Outings 🏬;Music 🎵;Theme Park 🎢;Cafe & Shisha 💨;Bowling 🎳;Camping 🏕️',
+    'Health 💊|Doctor 👨‍⚕️;Hospital 🏥;Pharmacy 💊;Dental 🦷;Health Insurance 🛡️;Gym / Fitness 💪;Eye Care 👓;Lab Tests 🧪;Vitamins 🍊;Physiotherapy 🦴;Mental Health 🧠;Medical Equipment 🩺',
+    'Education 📚|Tuition 🎓;Books & Supplies 📖;Courses 💻;School Fees 🏫;School Uniform 👔;School Transport 🚌;Exam Fees 📝;Online Learning 🖥️;Language Classes 🗣️',
+    'Kids 👶|Kids Clothing 👕;Toys 🧸;Kids Activities 🎨;Babysitter 👩‍🍼;Diapers / Formula 🍼;Pocket Money 🪙;Kids Medical 🩹;Birthday Party 🎂;School Bag 🎒',
+    'Travel ✈️|Flights ✈️;Hotels 🏨;Visa / Passport 🛂;Travel Activities 🎢;Baggage 🧳;Travel Insurance 🛡️;Airport Transfer 🚖;Food while Travelling 🥘;Souvenirs 🛍️;Excess Baggage ⚖️',
+    'Bills & Subscriptions 📄|Electricity Bill ⚡;Water Bill 💧;Gas 🔥;Subscriptions 📱;Insurance 🛡️;Government Fees 🏛️;Mobile Recharge 📲;Internet Bill 📶;TV / Cable 📡;Cloud & Apps ☁️;Bank Charges 🏦;Annual Fees 🗓️',
+    'Family & Remittance 👪|Money Transfer Home 🌍;Exchange Fees 💱;Parents Support 👵;Spouse 💞;Siblings 👫;Relatives Help 🤝;Wedding Contribution 💒;Home Country Expenses 🏡',
+    'Domestic Help 🧹|Maid 🧹;Driver 🚗;Cook 👨‍🍳;Gardener 🌿;Nanny 👩‍🍼;Part-time Cleaner 🧼',
+    'Charity ❤️|Sadaqah 🤲;Zakat 🕌;Donations 🎁;Masjid Contribution 🕋;Orphan Support 🧒;Eid Gifts 🌙',
+    'Personal Care 💄|Haircut 💇;Spa / Massage 💆;Cosmetics 💅;Skincare 🧴;Salon 💈;Toiletries 🧼;Perfume & Oud 🪔',
+    'Pets 🐾|Pet Food 🦴;Vet 🩺;Pet Grooming 🛁;Pet Supplies 🐕',
+    'Home Improvement 🛠️|Paint 🎨;Tools 🔧;Renovation 🏗️;Decor 🖼️;Curtains 🪟;Appliances 📺;Garden 🌱;Lighting 💡',
+    'Work & Business 💼|Office Supplies 📎;Work Tools 🧰;Work Uniform 🦺;Licences & Fees 📜;Business Travel 🧳;Client Meals 🍽️;Software 💻;Advertising 📢;Professional Courses 🎓',
+    'Insurance & Legal ⚖️|Life Insurance 🛡️;Home Insurance 🏠;Legal Fees ⚖️;Attestation / Notary 📜;Translation 🌐;Residence Permit 🪪;Medical Card 🩺',
+    'Savings & Investments 💰|Emergency Fund 🚨;Gold 🥇;Stocks 📈;Mutual Funds 📊;Fixed Deposit 🏦;Crypto ₿;Retirement 🌴;Chit / Society ⭕',
+    'Loans & EMI 🏦|Personal Loan 💳;Car Loan 🚗;Home Loan 🏠;Credit Card Payment 💳;Education Loan 🎓;Interest & Charges 🧾',
+    'Festivals & Events 🎉|Eid 🌙;Birthday 🎂;Wedding 💒;Anniversary 💞;Ramadan 🕌;Party 🥳;Gifts Given 🎁',
+    'Technology 💻|Mobile 📱;Laptop 💻;Headphones & Accessories 🎧;Repairs 🔧;Apps & Software 🧩;Network Devices 📡',
+    'Sports & Hobbies ⚽|Football ⚽;Cricket 🏏;Gym Equipment 🏋️;Swimming 🏊;Fishing 🎣;Photography 📷;Cycling 🚴;Desert Trips 🏜️',
+    'Fines & Penalties 🚨|Traffic Fine 🚦;Late Fee ⏰;Visa / Residency Fine 🛂;Other Fine 📃',
+    'Other 📌|Miscellaneous ❓;Emergency 🚨;Bank Fees 🏦;Lost / Stolen 😞;Tips 💵;Unknown 🔍'
+  ],
+  income: [
+    'Salary 💼|Base Salary 💵;Bonus 🎁;Overtime ⏰;End of Service 🏁;Allowance 🍱;Commission 🤝;Leave Salary 🏖️;Ticket Allowance ✈️;Housing Allowance 🏠;Incentive 🏆',
+    'Business 🏢|Sales 💰;Consulting 💼;Freelance 💻;Side Hustle 🧩;Online Selling 📦;Services 🛠️',
+    'Investments 📈|Dividends 📊;Interest 💹;Capital Gains 📈;Stocks 📉;Mutual Fund Returns 📊;Gold Profit 🥇;Crypto Profit ₿;Fixed Deposit Interest 🏦',
+    'Rental Income 🏘️|Property Rent 🏠;Room Rent 🛏️;Car Rent 🚗;Parking Rent 🅿️',
+    'Gifts 🎁|Cash Gift 💵;Eid Gift 🌙;Inheritance 📜;Wedding Gift 💒;Family Support 👪',
+    'Refunds & Cashback ↩️|Refund ↩️;Cashback 💳;Reward Points 🎯;Deposit Returned 🔐;Insurance Claim 🛡️;Fee Refund 🧾',
+    'Other Income 💵|Selling Items 🏷️;Prize / Lottery 🏆;Part-time Job ⏱️;Tips Received 🪙;Government Benefit 🏛️;Money Received 📥'
+  ]
+};
+const UXP = {};
+(function () {
+  const sp = x => { const i = x.lastIndexOf(' '); return [x.slice(0, i), x.slice(i + 1)]; };
+  Object.keys(UXRAW).forEach(t => { UXP[t] = UXRAW[t].map(s => { const [h, subs] = s.split('|'); const [name, icon] = sp(h); return { name, icon, subs: (subs || '').split(';').filter(Boolean).map(x => { const [n, i] = sp(x); return { name: n, icon: i }; }) }; }); });
+})();
+const lc = x => String(x || '').toLowerCase().trim();
+function uxLocal() { try { return JSON.parse(localStorage.getItem('jamshi-cats') || '[]'); } catch (e) { return []; } }
+function uxLocalAdd(c) { const a = uxLocal(); a.push(c); try { localStorage.setItem('jamshi-cats', JSON.stringify(a)); } catch (e) {} }
+function uxCatList(type) {
+  const out = [], seen = new Set(), add = (name, icon) => { if (!name || seen.has(lc(name))) return; seen.add(lc(name)); out.push({ name, icon: icon || '' }); };
+  state.categories.filter(c => !c.parentId && (c.type || 'expense') === type).forEach(c => add(c.name, c.icon && c.icon !== '•' ? c.icon : ''));
+  uxLocal().filter(c => !c.parent && c.type === type).forEach(c => add(c.name, c.icon));
+  (UXP[type] || []).forEach(c => add(c.name, c.icon));
+  return out;
+}
+function catIcon(name) {
+  const n = lc(name);
+  const c = state.categories.find(x => lc(x.name) === n && x.icon && x.icon !== '•'); if (c) return c.icon;
+  const l = uxLocal().find(x => lc(x.name) === n && x.icon); if (l) return l.icon;
+  for (const t of Object.keys(UXP)) { const k = UXP[t].find(x => lc(x.name) === n); if (k) return k.icon; }
+  const key = Object.keys(UX.icons).find(k => n.includes(k)); return UX.icons[key] || '🏷️';
+}
+function subsFor(name) {
+  const n = lc(name), out = [], seen = new Set(), add = (s, i) => { if (!s || seen.has(lc(s))) return; seen.add(lc(s)); out.push({ name: s, icon: i || '' }); };
+  const ids = new Set(state.categories.filter(c => lc(c.name) === n && !c.parentId).map(p => String(p.id)));
+  state.categories.filter(x => x.parentId && (ids.has(String(x.parentId)) || lc(x.parentId) === n)).forEach(x => add(x.name, x.icon && x.icon !== '•' ? x.icon : ''));
+  uxLocal().filter(x => lc(x.parent) === n).forEach(x => add(x.name, x.icon));
+  Object.keys(UXP).forEach(t => UXP[t].filter(c => lc(c.name) === n).forEach(c => c.subs.forEach(s => add(s.name, s.icon))));
+  return out;
+}
+function uxChips() {
+  const sel = $('tx-category'); let box = $('cat-chips');
+  if (!box) { box = document.createElement('div'); box.id = 'cat-chips'; box.className = 'chips'; sel.insertAdjacentElement('beforebegin', box); }
+  const cur = sel.value;
+  if (cur && !UXS.catOpen) box.innerHTML = `<button type="button" class="chip on" data-cat="${esc(cur)}"><span>${catIcon(cur)}</span>${esc(cur)}</button><button type="button" class="chip ghost" data-change="1">Change</button>`;
+  else box.innerHTML = [...sel.options].filter(o => o.value).map(o => `<button type="button" class="chip ${o.value === cur ? 'on' : ''}" data-cat="${esc(o.value)}"><span>${catIcon(o.value)}</span>${esc(o.value)}</button>`).join('') + '<button type="button" class="chip ghost" data-newcat="1">＋ New category</button>';
+}
+function uxSubs() {
+  const inp = $('tx-subcategory'); let box = $('sub-chips');
+  if (!box) { box = document.createElement('div'); box.id = 'sub-chips'; box.className = 'chips'; inp.insertAdjacentElement('beforebegin', box); }
+  const cat = $('tx-category').value, list = subsFor(cat), cur = inp.value;
+  if (!cat) { box.innerHTML = ''; return; }
+  if (cur && !UXS.subOpen) box.innerHTML = `<button type="button" class="chip on" data-subclear="1">${esc(cur)} ✕</button>`;
+  else box.innerHTML = list.map(s => `<button type="button" class="chip ${cur === s.name ? 'on' : ''}" data-sub="${esc(s.name)}">${s.icon ? '<span>' + s.icon + '</span>' : ''}${esc(s.name)}</button>`).join('') + '<button type="button" class="chip ghost" data-newsub="1">＋ New sub</button>';
+}
+function uxForm() {
+  const sel = $('tx-category'), cur = sel.value, type = $('tx-type').value, names = uxCatList(type).map(c => c.name);
+  sel.removeAttribute('required');
+  sel.innerHTML = '<option value="">Select category</option>' + names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  sel.value = names.includes(cur) ? cur : '';
+  if (!sel.value) UXS.catOpen = true;
+  sourceFields(); uxChips(); uxSubs();
+}
+function renderSelects() {
+  const ids = ['tx-account', 'tx-card', 'budget-category', 'payment-card', 'payment-account'], keep = ids.map(i => [i, $(i).value]);
+  $('tx-account').innerHTML = state.accounts.map(a => `<option value="${esc(a.id)}">${esc(a.name)} (${money(a.balance)})</option>`).join('');
+  $('tx-card').innerHTML = state.cards.map(c => `<option value="${esc(c.id)}">${esc(c.name)} (•••• ${esc(c.last4 || '')})</option>`).join('');
+  $('budget-category').innerHTML = uxCatList('expense').map(c => `<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('');
+  $('payment-card').innerHTML = state.cards.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
+  $('payment-account').innerHTML = state.accounts.map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
+  keep.forEach(([i, v]) => { if (v && [...$(i).options].some(o => o.value === v)) $(i).value = v; });
+}
+
+/* ----- Add category / subcategory with emoji ----- */
+const UX_EMOJI = '🍔 🍕 🍟 🌮 🍣 🍜 🥗 🍎 🥦 🥩 🍞 ☕ 🍵 🥤 🍰 🛒 ⛽ 🚗 🚕 🚌 🚇 ✈️ 🏨 🏠 🔑 💡 💧 🔥 📶 📞 📱 💻 🎮 🎬 🎵 📚 🎓 🏫 👶 🧸 🐾 💊 🏥 🦷 💪 ⚽ 🏏 🛍️ 👕 👟 💄 💇 🎁 🎉 💍 🕌 🤲 ❤️ 💼 💰 💵 💳 🏦 📈 🛡️ 🧾 🔧 🧹 🌿 🚿 🅿️ 🎟️ 🧳 🌍 📦 📌'.split(' ');
+function uxCatForm(type, parent) {
+  const opts = t => '<option value="">— None (new main category) —</option>' + uxCatList(t).map(c => `<option value="${esc(c.name)}">${c.icon} ${esc(c.name)}</option>`).join('');
+  uxSheet(`<h3>${parent ? 'New subcategory' : 'New category'}</h3><div class="lf"><label>Type</label><select id="cf-type"><option value="expense">Expense</option><option value="income">Income</option></select></div><div class="lf"><label>Main category (empty = create a main category)</label><select id="cf-parent">${opts(type)}</select></div><div class="lf"><label>Name</label><input id="cf-name" placeholder="e.g. Pharmacy"></div><div class="lf"><label>Emoji (tap one or type your own)</label><input id="cf-icon" maxlength="6" placeholder="🙂"><div class="emojis">${UX_EMOJI.map(e => `<button type="button" data-emo="${e}">${e}</button>`).join('')}</div></div><div class="sheet-btns"><button data-save="1" class="save-btn">Save</button><button data-close>Cancel</button></div>`,
+    async (e, close) => {
+      const emo = e.target.closest('[data-emo]'); if (emo) { $('cf-icon').value = emo.dataset.emo; return; }
+      if (!e.target.closest('[data-save]')) return;
+      const t = $('cf-type').value, par = $('cf-parent').value, name = $('cf-name').value.trim(), icon = $('cf-icon').value.trim() || '📌';
+      if (!name) return toast('Enter a name.', 'error');
+      if (par ? subsFor(par).some(s => lc(s.name) === lc(name)) : uxCatList(t).some(c => lc(c.name) === lc(name))) return toast('That name already exists.', 'error');
+      close();
+      const pc = state.categories.find(c => lc(c.name) === lc(par) && !c.parentId);
+      const row = { id: uid(), name, type: t, icon, parentId: par ? (pc ? pc.id : par) : '', color: '#64748b', sortOrder: state.categories.length + 1 };
+      state.categories.push(row); renderAll();
+      if ($('view-add').classList.contains('active')) {
+        if (par) { $('tx-subcategory').value = name; UXS.subOpen = false; uxSubs(); }
+        else if ($('tx-type').value === t) { $('tx-category').value = name; $('tx-subcategory').value = ''; UXS.catOpen = false; UXS.subOpen = true; sourceFields(); uxChips(); uxSubs(); }
+      }
+      toast('Added ✓', 'success');
+      try { await api('addCategory', { data: row }); uxSync(); }
+      catch (err) { uxLocalAdd({ name, icon, type: t, parent: par }); toast('Saved on this phone only (' + err.message + ')', 'error'); }
+    });
+  $('cf-type').value = type; $('cf-parent').innerHTML = opts(type); $('cf-parent').value = parent || '';
+  $('cf-type').onchange = () => { $('cf-parent').innerHTML = opts($('cf-type').value); };
+}
+function addCategory() { uxCatForm($('tx-type') ? $('tx-type').value : 'expense', ''); }
+document.addEventListener('click', e => {
+  if (e.target.closest('[data-newcat]')) return uxCatForm($('tx-type').value, '');
+  if (e.target.closest('[data-newsub]')) return uxCatForm($('tx-type').value, $('tx-category').value);
+  if (e.target.closest('[data-more]')) { HS.limit += 60; renderHistory(); }
+});
+
+/* ----- History: everything, grouped by day, filters, show-more ----- */
+const HS = { limit: 60 };
+function uxMonth(m) { return new Date(m + '-01T00:00:00').toLocaleString('en', { month: 'short', year: 'numeric' }); }
+function uxDay(d) {
+  const t = today(), y = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
+  if (d === t) return 'Today'; if (d === y) return 'Yesterday';
+  return new Date(d + 'T00:00:00').toLocaleDateString('en', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+}
+function uxHistInit() {
+  if ($('history-month')) return;
+  document.querySelector('#view-history .filters').insertAdjacentHTML('beforeend', '<select id="history-month"></select><select id="history-cat"></select>');
+  ['history-month', 'history-cat', 'history-type'].forEach(i => $(i).addEventListener('change', () => { HS.limit = 60; renderHistory(); }));
+  $('search').addEventListener('input', () => { HS.limit = 60; });
+}
+function renderHistory() {
+  uxHistInit();
+  const q = lc($('search').value || ''), type = $('history-type').value, mSel = $('history-month'), cSel = $('history-cat'), mCur = mSel.value, cCur = cSel.value;
+  const months = [...new Set(state.transactions.map(t => String(t.date).slice(0, 7)).filter(Boolean))].sort().reverse();
+  const cats = [...new Set(state.transactions.map(t => t.category).filter(Boolean))].sort();
+  mSel.innerHTML = '<option value="">All time</option>' + months.map(m => `<option value="${m}">${uxMonth(m)}</option>`).join('');
+  cSel.innerHTML = '<option value="">All categories</option>' + cats.map(c => `<option value="${esc(c)}">${catIcon(c)} ${esc(c)}</option>`).join('');
+  mSel.value = months.includes(mCur) ? mCur : ''; cSel.value = cats.includes(cCur) ? cCur : '';
+  const rows = state.transactions.slice().reverse().filter(t => (type === 'all' || t.type === type) && (!mSel.value || String(t.date).startsWith(mSel.value)) && (!cSel.value || t.category === cSel.value) && (!q || [t.category, t.subcategory, t.product, t.note, t.date].join(' ').toLowerCase().includes(q))).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const sum = ty => rows.filter(t => t.type === ty && !isLoanTx(t)).reduce((s, t) => s + t.amount, 0);
+  let html = `<div class="hist-sum"><span>${rows.length} transactions</span><span class="pos">+${money(sum('income'))}</span><span class="neg">−${money(sum('expense'))}</span></div>`, last = '';
+  rows.slice(0, HS.limit).forEach(t => { const d = String(t.date).slice(0, 10); if (d !== last) { html += `<div class="day-head">${uxDay(d)}</div>`; last = d; } html += txRow(t); });
+  if (rows.length > HS.limit) html += `<button class="secondary wide" data-more="1">Show more (${rows.length - HS.limit} left)</button>`;
+  $('history-list').innerHTML = rows.length ? html : '<p class="empty">No matching transactions.</p>';
+}
+
+uxForm();

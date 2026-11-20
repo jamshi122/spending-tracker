@@ -54,3 +54,8 @@ body.dark .chip{border-color:#34445b}
 .lh{display:flex;justify-content:space-between;gap:10px;font-size:13px;padding:9px 0;border-bottom:1px solid var(--line);text-align:left}
 .lh small{display:block;color:var(--muted);font-size:11px;margin-top:3px}
 #loans-box .account-row{cursor:pointer}
+.emojis{display:flex;flex-wrap:wrap;gap:6px;max-height:140px;overflow:auto;margin-top:6px}
+.emojis button{border:0;background:#f1f4f9;border-radius:10px;font-size:22px;padding:6px 8px}
+.day-head{font-size:12px;font-weight:800;color:var(--muted);padding:14px 0 2px}
+.hist-sum{display:flex;justify-content:space-between;gap:8px;font-size:12px;font-weight:700;padding:12px 0 4px;color:var(--muted)}
+body.dark .emojis button{background:#2b394d}
