@@ -1,455 +1,468 @@
+/**
+ * Jamshi Solution – Spending Tracker
+ * Public access mode - no login or authentication
+ *
+ * Existing spreadsheet data is preserved.
+ * No sheets are created, reset, or cleared.
+ * No automatic balance rebuild or category reset.
+ */
+
 const SHEETS = {
   TX: 'Transactions', ACC: 'Accounts', CARD: 'CreditCards',
-  PAY: 'CardPayments', FUEL: 'FuelLog', CAT: 'Categories', USER: 'Users', BUDGET: 'Budgets'
+  PAY: 'CardPayments', FUEL: 'FuelLog', CAT: 'Categories',
+  USER: 'Users', BUDGET: 'Budgets'
 };
+
 const HEADERS = {
-  TX: ['id','date','type','amount','category','subcategory','product',
-       'note','accountId','cardId','userId','fuelId','createdAt'],
+  TX: ['id','date','type','amount','category','subcategory','product','note','accountId','cardId','userId','fuelId','createdAt','receiptUrl','isPrivate'],
   ACC: ['id','name','type','owner','balance','currency'],
   CARD: ['id','name','last4','owner','limit','balance','dueDay','color'],
-  PAY: ['id','date','cardId','accountId','amount','note'],
-  FUEL: ['id','date','cardId','accountId','userId','vehicle',
-         'odometer','liters','pricePerLiter','total','fullTank','note'],
+  PAY: ['id','date','cardId','accountId','amount','note','userId'],
+  FUEL: ['id','date','cardId','accountId','userId','vehicle','odometer','liters','pricePerLiter','total','fullTank','note','receiptUrl'],
   CAT: ['id','name','parentId','type','icon','color','sortOrder'],
-  USER: ['id','name','color'],
+  USER: ['id','name','color','role','email'],
   BUDGET: ['id','category','amount','period','userId']
 };
 
-function getOrCreateSheet(name, headers) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let sheet = ss.getSheetByName(name);
-  if (!sheet) { sheet = ss.insertSheet(name); sheet.appendRow(headers); sheet.setFrozenRows(1); }
-  return sheet;
-}
+/* ================= API ENTRY POINTS ================= */
 
-function setupAllSheets() {
-  Object.keys(SHEETS).forEach(k => getOrCreateSheet(SHEETS[k], HEADERS[k]));
-  seedCategories();
-}
-
-function seedCategories() {
-  const sheet = getOrCreateSheet(SHEETS.CAT, HEADERS.CAT);
-  if (sheet.getLastRow() > 1) return;
-
-  // Format: [name, parentName, type, icon]
-  const data = [
-
-    // ==================== EXPENSE ====================
-
-    // FUEL (special — triggers odometer fields in the app)
-    ['Fuel','', 'expense','⛽'],
-    ['Petrol','Fuel','expense','⛽'],
-    ['Diesel','Fuel','expense','🛢️'],
-    ['Premium Fuel','Fuel','expense','🌟'],
-    ['Car Wash','Fuel','expense','🚿'],
-
-    // FOOD & DINING
-    ['Food & Dining','', 'expense','🍔'],
-    ['Groceries','Food & Dining','expense','🛒'],
-    ['Restaurants','Food & Dining','expense','🍽️'],
-    ['Coffee','Food & Dining','expense','☕'],
-    ['Delivery','Food & Dining','expense','🛵'],
-    ['Bakery','Food & Dining','expense','🥖'],
-    ['Snacks','Food & Dining','expense','🍿'],
-    ['Water','Food & Dining','expense','💧'],
-
-    // TRANSPORTATION
-    ['Transportation','', 'expense','🚗'],
-    ['Public Transit','Transportation','expense','🚇'],
-    ['Taxi / Uber / Careem','Transportation','expense','🚕'],
-    ['Parking','Transportation','expense','🅿️'],
-    ['Car Maintenance','Transportation','expense','🔧'],
-    ['Car Insurance','Transportation','expense','🛡️'],
-    ['Car Registration','Transportation','expense','📋'],
-    ['Traffic Fines','Transportation','expense','🚨'],
-    ['Salik / Tolls','Transportation','expense','🛣️'],
-
-    // HOUSING
-    ['Housing','', 'expense','🏠'],
-    ['Rent','Housing','expense','🔑'],
-    ['Electricity (Kahramaa)','Housing','expense','⚡'],
-    ['Water (Kahramaa)','Housing','expense','💧'],
-    ['Internet','Housing','expense','📶'],
-    ['Phone Bill','Housing','expense','📞'],
-    ['Maintenance','Housing','expense','🔨'],
-    ['Home Goods','Housing','expense','🛋️'],
-    ['Furniture','Housing','expense','🪑'],
-
-    // SHOPPING
-    ['Shopping','', 'expense','🛍️'],
-    ['Clothing','Shopping','expense','👕'],
-    ['Electronics','Shopping','expense','💻'],
-    ['Personal Care','Shopping','expense','💄'],
-    ['Books','Shopping','expense','📖'],
-    ['Gifts','Shopping','expense','🎁'],
-    ['Sports Equipment','Shopping','expense','⚽'],
-
-    // ENTERTAINMENT
-    ['Entertainment','', 'expense','🎬'],
-    ['Movies','Entertainment','expense','🎥'],
-    ['Streaming','Entertainment','expense','📺'],
-    ['Games','Entertainment','expense','🎮'],
-    ['Events','Entertainment','expense','🎟️'],
-    ['Hobbies','Entertainment','expense','🎨'],
-    ['Malls / Outings','Entertainment','expense','🏬'],
-
-    // HEALTH
-    ['Health','', 'expense','💊'],
-    ['Doctor','Health','expense','👨‍⚕️'],
-    ['Hospital','Health','expense','🏥'],
-    ['Pharmacy','Health','expense','💊'],
-    ['Dental','Health','expense','🦷'],
-    ['Health Insurance','Health','expense','🛡️'],
-    ['Gym / Fitness','Health','expense','💪'],
-
-    // EDUCATION
-    ['Education','', 'expense','📚'],
-    ['Tuition','Education','expense','🎓'],
-    ['Books & Supplies','Education','expense','📖'],
-    ['Courses','Education','expense','💻'],
-    ['School Fees','Education','expense','🏫'],
-
-    // KIDS
-    ['Kids','', 'expense','👶'],
-    ['Kids Clothing','Kids','expense','👕'],
-    ['Toys','Kids','expense','🧸'],
-    ['Kids Activities','Kids','expense','🎨'],
-    ['Babysitter','Kids','expense','👩‍🍼'],
-    ['Diapers / Formula','Kids','expense','🍼'],
-
-    // TRAVEL
-    ['Travel','', 'expense','✈️'],
-    ['Flights','Travel','expense','✈️'],
-    ['Hotels','Travel','expense','🏨'],
-    ['Visa / Passport','Travel','expense','🛂'],
-    ['Travel Activities','Travel','expense','🎢'],
-    ['Baggage','Travel','expense','🧳'],
-
-    // BILLS & SUBSCRIPTIONS
-    ['Bills & Subscriptions','', 'expense','📄'],
-    ['Electricity Bill','Bills & Subscriptions','expense','⚡'],
-    ['Water Bill','Bills & Subscriptions','expense','💧'],
-    ['Gas','Bills & Subscriptions','expense','🔥'],
-    ['Subscriptions','Bills & Subscriptions','expense','📱'],
-    ['Insurance','Bills & Subscriptions','expense','🛡️'],
-    ['Government Fees','Bills & Subscriptions','expense','🏛️'],
-
-    // DOMESTIC HELP (common in Qatar)
-    ['Domestic Help','', 'expense','🧹'],
-    ['Maid','Domestic Help','expense','🧹'],
-    ['Driver','Domestic Help','expense','🚗'],
-    ['Cook','Domestic Help','expense','👨‍🍳'],
-    ['Gardener','Domestic Help','expense','🌿'],
-
-    // CHARITY
-    ['Charity','', 'expense','❤️'],
-    ['Sadaqah','Charity','expense','🤲'],
-    ['Zakat','Charity','expense','🕌'],
-    ['Donations','Charity','expense','🎁'],
-
-    // PERSONAL CARE
-    ['Personal Care','', 'expense','💄'],
-    ['Haircut','Personal Care','expense','💇'],
-    ['Spa / Massage','Personal Care','expense','💆'],
-    ['Cosmetics','Personal Care','expense','💅'],
-
-    // OTHER
-    ['Other','', 'expense','📌'],
-    ['Miscellaneous','Other','expense','❓'],
-    ['Emergency','Other','expense','🚨'],
-    ['Bank Fees','Other','expense','🏦'],
-
-    // ==================== INCOME ====================
-
-    ['Salary','', 'income','💼'],
-    ['Base Salary','Salary','income','💵'],
-    ['Bonus','Salary','income','🎁'],
-    ['Overtime','Salary','income','⏰'],
-    ['End of Service','Salary','income','🏁'],
-
-    ['Business','', 'income','🏢'],
-    ['Sales','Business','income','💰'],
-    ['Consulting','Business','income','💼'],
-    ['Freelance','Business','income','💻'],
-
-    ['Investments','', 'income','📈'],
-    ['Dividends','Investments','income','📊'],
-    ['Interest','Investments','income','💹'],
-    ['Capital Gains','Investments','income','📈'],
-    ['Stocks','Investments','income','📉'],
-
-    ['Rental Income','', 'income','🏘️'],
-    ['Property Rent','Rental Income','income','🏠'],
-
-    ['Gifts','', 'income','🎁'],
-    ['Cash Gift','Gifts','income','💵'],
-    ['Inheritance','Gifts','income','📜'],
-
-    ['Refunds & Cashback','', 'income','↩️'],
-    ['Refund','Refunds & Cashback','income','↩️'],
-    ['Cashback','Refunds & Cashback','income','💳'],
-
-    ['Other Income','', 'income','💵']
-  ];
-
-  const idByName = {};
-  data.forEach((c, i) => {
-    const id = Utilities.getUuid();
-    idByName[c[0]] = id;
-    sheet.appendRow([id, c[0], '', c[2], c[3], '#007AFF', i]);
-  });
-  data.forEach((c, i) => {
-    if (c[1]) {
-      const parentId = idByName[c[1]];
-      if (parentId) sheet.getRange(i + 2, 3).setValue(parentId);
-    }
-  });
-}
-
-// ============ API ============
-// Create missing sheets only once (was running on EVERY request = slow)
-function ensureSetup() {
-  const props = PropertiesService.getScriptProperties();
-  if (props.getProperty('SETUP_V2') === '1') return;
-  setupAllSheets();
-  props.setProperty('SETUP_V2', '1');
+function doGet() {
+  return json({ success: true, message: 'Jamshi Spending Tracker API is ready.' });
 }
 
 function doPost(e) {
-  const lock = LockService.getScriptLock();
+  let lock;
   try {
-    lock.waitLock(20000); // stop two saves from corrupting balances
-    const body = JSON.parse(e.postData.contents);
-    const action = body.action;
-    ensureSetup();
-
-    if (action === 'addTx')           return addTx(body.data);
-    if (action === 'updateTx')        return updateTx(body.id, body.data);
-    if (action === 'deleteTx')        return deleteTx(body.id);
-    if (action === 'addCard')         return addRow(SHEETS.CARD, body.data, HEADERS.CARD);
-    if (action === 'addAccount')      return addRow(SHEETS.ACC, body.data, HEADERS.ACC);
-    if (action === 'addPayment')      return addPayment(body.data);
-    if (action === 'addFuel')         return addFuelTx(body.data);
-    if (action === 'addUser')         return addRow(SHEETS.USER, body.data, HEADERS.USER);
-    if (action === 'addCategory')     return addRow(SHEETS.CAT, body.data, HEADERS.CAT);
-    if (action === 'deleteCategory')  return deleteRow(SHEETS.CAT, body.id);
-    if (action === 'saveBudget')      return saveBudget(body.data);
-    if (action === 'deleteBudget')    return deleteRow(SHEETS.BUDGET, body.id);
-    if (action === 'rebuildBalances') return rebuildBalances();
-    if (action === 'resetCategories') {
-      const s = getOrCreateSheet(SHEETS.CAT, HEADERS.CAT);
-      if (s.getLastRow() > 1) s.getRange(2, 1, s.getLastRow() - 1, HEADERS.CAT.length).clearContent();
-      seedCategories();
-      return json({ success: true });
+    if (!e || !e.postData || !e.postData.contents) {
+      return json({ success: false, error: 'Empty request.' });
     }
-    return json({ success: false, error: 'unknown action' });
+
+    const body = JSON.parse(e.postData.contents);
+    const action = String(body.action || '');
+    if (!action) return json({ success: false, error: 'Missing action.' });
+
+    // Public mode: no password, Google sign-in, token, or user authentication.
+    // All visitors share the administrator-level tracker identity.
+    const user = getPublicAccessUser_();
+
+    if (action === 'getData') return getData_(user, body.version);
+
+    lock = LockService.getScriptLock();
+    lock.waitLock(20000);
+
+    let result;
+    switch (action) {
+      case 'addTx':
+        result = addTx_(user, body.data);
+        break;
+      case 'updateTx':
+        result = updateTx_(user, body.id, body.data);
+        break;
+      case 'deleteTx':
+        result = deleteTx_(user, body.id);
+        break;
+      case 'addCard':
+        requireAdmin_(user);
+        result = addRow_('CARD', body.data);
+        break;
+      case 'addAccount':
+        requireAdmin_(user);
+        result = addRow_('ACC', body.data);
+        break;
+      case 'addPayment':
+        result = addPayment_(user, body.data);
+        break;
+      case 'addFuel':
+        result = addFuel_(user, body.data);
+        break;
+      case 'addUser':
+        requireAdmin_(user);
+        result = addUser_(body.data);
+        break;
+      case 'addCategory':
+        requireAdmin_(user);
+        result = addRow_('CAT', body.data);
+        break;
+      case 'deleteCategory':
+        requireAdmin_(user);
+        result = deleteRow_('CAT', body.id);
+        break;
+      case 'saveBudget':
+        result = saveBudget_(user, body.data);
+        break;
+      case 'deleteBudget':
+        result = deleteBudget_(user, body.id);
+        break;
+      case 'uploadReceipt':
+        result = uploadReceipt_(user, body.data);
+        break;
+      case 'rebuildBalances':
+        requireAdmin_(user);
+        result = { success: false, error: 'Automatic balance rebuilding is disabled to protect existing opening balances.' };
+        break;
+      case 'resetCategories':
+        requireAdmin_(user);
+        result = { success: false, error: 'Category reset is disabled to protect existing data.' };
+        break;
+      default:
+        result = { success: false, error: 'Unknown or unsupported action.' };
+    }
+
+    if (result && result.success) bumpDataVersion_();
+    return json(result || { success: false, error: 'No result returned.' });
+
   } catch (err) {
-    return json({ success: false, error: err.toString() });
+    console.error(err && err.stack ? err.stack : err);
+    return json({ success: false, error: safeError_(err) });
   } finally {
-    try { lock.releaseLock(); } catch (x) {}
+    if (lock) {
+      try { lock.releaseLock(); } catch (ignored) {}
+    }
   }
 }
 
-function doGet(e) {
+/* ================= PUBLIC ACCESS ================= */
+
+// There is deliberately no authentication in this mode. The first existing
+// admin row is used only as the shared transaction owner/display identity.
+// The Users sheet is read-only here; no rows or columns are created or reset.
+function getPublicAccessUser_() {
+  const sheet = getSheet_('USER');
+  const values = sheet.getDataRange().getValues();
+  if (values.length > 1) {
+    const headers = values[0].map(value => String(value).trim().toLowerCase());
+    const idIndex = headers.indexOf('id');
+    const nameIndex = headers.indexOf('name');
+    const colorIndex = headers.indexOf('color');
+    const roleIndex = headers.indexOf('role');
+    for (let i = 1; i < values.length; i++) {
+      const row = values[i];
+      if (String(row[roleIndex] || '').trim().toLowerCase() === 'admin') {
+        return {
+          id: String(row[idIndex] || 'u1'),
+          name: String(row[nameIndex] || 'Shared User'),
+          color: colorIndex >= 0 ? String(row[colorIndex] || '#007aff') : '#007aff',
+          role: 'admin',
+          email: ''
+        };
+      }
+    }
+  }
+  return { id: 'public', name: 'Shared User', color: '#007aff', role: 'admin', email: '' };
+}
+
+function requireAdmin_(user) {
+  if (!user || user.role !== 'admin') throw new Error('Administrator permission required.');
+}
+
+function canAccessRecord_(user, recordUserId) {
+  return user.role === 'admin' || String(recordUserId || '') === String(user.id);
+}
+
+/* ================= FAST DATA SYNC ================= */
+
+function getData_(user, requestedVersion) {
   try {
-    ensureSetup();
-    const tz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+    const version = getDataVersion_();
+    if (requestedVersion !== undefined && requestedVersion !== null && String(requestedVersion) === String(version)) {
+      return json({ success: true, unchanged: true, version: version, user: publicUser_(user) });
+    }
+
     const result = {};
-    Object.keys(SHEETS).forEach(k => {
-      const sheet = getOrCreateSheet(SHEETS[k], HEADERS[k]);
-      const data = sheet.getDataRange().getValues();
-      const headers = data[0];
-      result[k] = data.slice(1).map(row => {
-        const o = {};
-        // Dates -> plain yyyy-MM-dd so they don't shift a day back
-        headers.forEach((h, i) => o[h] = (row[i] instanceof Date) ? Utilities.formatDate(row[i], tz, 'yyyy-MM-dd') : row[i]);
-        return o;
-      });
+    Object.keys(SHEETS).forEach(key => {
+      const sheet = getSheet_(key);
+      const values = sheet.getDataRange().getValues();
+      if (!values.length) { result[key] = []; return; }
+      const headers = values[0].map(h => String(h).trim());
+      result[key] = values.slice(1)
+        .filter(row => row.some(v => v !== '' && v !== null))
+        .map(row => {
+          const item = {};
+          headers.forEach((header, index) => {
+            const value = row[index];
+            item[header] = value instanceof Date
+              ? Utilities.formatDate(value, SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone(), 'yyyy-MM-dd')
+              : value;
+          });
+          return item;
+        });
     });
-    return json({ success: true, data: result });
+
+    result.TX = result.TX.filter(tx => user.role === 'admin' || !isPrivate_(tx.isPrivate) || String(tx.userId || '') === String(user.id));
+    result.PAY = result.PAY.filter(item => canAccessRecord_(user, item.userId));
+    result.FUEL = result.FUEL.filter(item => canAccessRecord_(user, item.userId));
+    result.BUDGET = result.BUDGET.filter(item => canAccessRecord_(user, item.userId));
+
+    // Public mode exposes the existing Users list. No passwords or auth data are used.
+    result.USER = user.role === 'admin'
+      ? result.USER.map(item => ({
+          id: item.id, name: item.name, color: item.color, role: item.role,
+          email: item.email || ''
+        }))
+      : [];
+
+    return json({ success: true, unchanged: false, version: version, user: publicUser_(user), data: result });
   } catch (err) {
-    return json({ success: false, error: err.toString() });
+    return json({ success: false, error: safeError_(err) });
   }
 }
 
-// ============ HELPERS ============
-function addRow(sheetName, data, headers) {
-  const sheet = getOrCreateSheet(sheetName, headers);
-  // Same id already there (e.g. repeated seeding) -> don't add a duplicate
-  if (data.id !== undefined && sheet.getLastRow() > 1) {
+function publicUser_(user) {
+  return { id: user.id, name: user.name, color: user.color, role: user.role };
+}
+
+function getDataVersion_() {
+  return PropertiesService.getScriptProperties().getProperty('DATA_VERSION') || '1';
+}
+
+function bumpDataVersion_() {
+  const props = PropertiesService.getScriptProperties();
+  const current = Number(props.getProperty('DATA_VERSION') || 1);
+  props.setProperty('DATA_VERSION', String(current + 1));
+}
+
+/* ================= SHEET HELPERS ================= */
+
+function getSheet_(key) {
+  const name = SHEETS[key];
+  if (!name) throw new Error('Unknown sheet key: ' + key);
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
+  if (!sheet) throw new Error('Required sheet not found: ' + name + '. No sheet was created or reset.');
+  return sheet;
+}
+
+function addRow_(key, data) {
+  if (!data || typeof data !== 'object') return { success: false, error: 'Invalid record.' };
+  const sheet = getSheet_(key), headers = HEADERS[key], id = String(data.id || Utilities.getUuid());
+  if (sheet.getLastRow() > 1) {
     const ids = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
-    if (ids.some(r => String(r[0]) === String(data.id))) return json({ success: true, duplicate: true });
+    if (ids.some(row => String(row[0]) === id)) return { success: true, duplicate: true };
   }
-  sheet.appendRow(headers.map(h => data[h] !== undefined ? data[h] : ''));
-  return json({ success: true });
+  sheet.appendRow(headers.map(header => header === 'id' ? id : data[header] !== undefined ? data[header] : ''));
+  return { success: true };
 }
 
-function deleteRow(sheetName, id) {
-  return deleteRowSilent(sheetName, id) ? json({ success: true }) : json({ success: false, error: 'not found' });
+function deleteRow_(key, id) {
+  const sheet = getSheet_(key), values = sheet.getDataRange().getValues();
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][0]) === String(id)) { sheet.deleteRow(i + 1); return { success: true }; }
+  }
+  return { success: false, error: 'Record not found.' };
 }
 
-function adjustBalance(type, id, delta) {
+function findRow_(sheet, id) {
+  const values = sheet.getDataRange().getValues();
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][0]) === String(id)) return { rowNumber: i + 1, values: values[i], headers: values[0] };
+  }
+  return null;
+}
+
+/* ================= BALANCE HELPERS ================= */
+
+function adjustBalance_(type, id, delta) {
   if (!id) return;
-  const key = type === 'card' ? SHEETS.CARD : SHEETS.ACC;
-  const col = type === 'card' ? 6 : 5;
-  const sheet = getOrCreateSheet(key, HEADERS[type === 'card' ? 'CARD' : 'ACC']);
-  const rows = sheet.getDataRange().getValues();
-  for (let i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]) === String(id)) {
-      const newBal = parseFloat(rows[i][col - 1] || 0) + delta;
-      sheet.getRange(i + 1, col).setValue(newBal);
+  const key = type === 'card' ? 'CARD' : 'ACC', sheet = getSheet_(key), values = sheet.getDataRange().getValues();
+  const balanceColumn = type === 'card' ? 6 : 5;
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][0]) === String(id)) {
+      const oldBalance = Number(values[i][balanceColumn - 1]) || 0;
+      sheet.getRange(i + 1, balanceColumn).setValue(oldBalance + delta);
       return;
     }
   }
+  throw new Error('Account or credit card not found.');
 }
 
-function addTx(data) {
-  const sheet = getOrCreateSheet(SHEETS.TX, HEADERS.TX);
-  sheet.appendRow([
-    data.id, data.date, data.type, data.amount,
-    data.category, data.subcategory || '', data.product || '',
-    data.note || '', data.accountId || '', data.cardId || '',
-    data.userId || '', data.fuelId || '', new Date().toISOString()
-  ]);
-  const amt = parseFloat(data.amount);
-  if (data.type === 'expense') {
-    if (data.cardId) adjustBalance('card', data.cardId, amt);
-    else if (data.accountId) adjustBalance('acc', data.accountId, -amt);
-  } else if (data.type === 'income') {
-    if (data.accountId) adjustBalance('acc', data.accountId, amt);
-  }
-  return json({ success: true });
-}
-
-function addFuelTx(data) {
-  const fuelId = data.id || Utilities.getUuid();
-  const fuelSheet = getOrCreateSheet(SHEETS.FUEL, HEADERS.FUEL);
-  fuelSheet.appendRow([
-    fuelId, data.date, data.cardId || '', data.accountId || '',
-    data.userId || '', data.vehicle, data.odometer, data.liters,
-    data.pricePerLiter, data.total, data.fullTank ? 'true' : 'false', data.note || ''
-  ]);
-  const txSheet = getOrCreateSheet(SHEETS.TX, HEADERS.TX);
-  txSheet.appendRow([
-    Utilities.getUuid(), data.date, 'expense', data.total,
-    'Fuel', data.vehicle, `⛽ ${data.liters}L @ QR ${data.pricePerLiter}`,
-    data.note || '', data.accountId || '', data.cardId || '',
-    data.userId || '', fuelId, new Date().toISOString()
-  ]);
-  const amt = parseFloat(data.total);
-  if (data.cardId) adjustBalance('card', data.cardId, amt);
-  else if (data.accountId) adjustBalance('acc', data.accountId, -amt);
-  return json({ success: true, id: fuelId });
-}
-
-function addPayment(data) {
-  const paySheet = getOrCreateSheet(SHEETS.PAY, HEADERS.PAY);
-  paySheet.appendRow([data.id, data.date, data.cardId, data.accountId, data.amount, data.note || '']);
-  adjustBalance('card', data.cardId, -parseFloat(data.amount));
-  if (data.accountId) adjustBalance('acc', data.accountId, -parseFloat(data.amount));
-  return json({ success: true });
-}
-
-function rebuildBalances() {
-  const cardSheet = getOrCreateSheet(SHEETS.CARD, HEADERS.CARD);
-  const accSheet  = getOrCreateSheet(SHEETS.ACC, HEADERS.ACC);
-  const txSheet   = getOrCreateSheet(SHEETS.TX, HEADERS.TX);
-  const paySheet  = getOrCreateSheet(SHEETS.PAY, HEADERS.PAY);
-  const cards = cardSheet.getDataRange().getValues();
-  for (let i = 1; i < cards.length; i++) cardSheet.getRange(i + 1, 6).setValue(0);
-  const accs = accSheet.getDataRange().getValues();
-  for (let i = 1; i < accs.length; i++) accSheet.getRange(i + 1, 5).setValue(0);
-  txSheet.getDataRange().getValues().slice(1).forEach(t => {
-    const amt = parseFloat(t[3] || 0);
-    if (t[2] === 'expense') {
-      if (t[9]) adjustBalance('card', t[9], amt);
-      else if (t[8]) adjustBalance('acc', t[8], -amt);
-    } else if (t[2] === 'income' && t[8]) adjustBalance('acc', t[8], amt);
-  });
-  paySheet.getDataRange().getValues().slice(1).forEach(p => {
-    adjustBalance('card', p[2], -parseFloat(p[4] || 0));
-    if (p[3]) adjustBalance('acc', p[3], -parseFloat(p[4] || 0));
-  });
-  return json({ success: true });
-}
-
-// Apply (mult=1) or reverse (mult=-1) a transaction's effect on balances
-function applyTxEffect(type, amount, accountId, cardId, mult) {
-  const amt = (parseFloat(amount) || 0) * mult;
+function applyTxEffect_(type, amount, accountId, cardId, multiplier) {
+  const value = (Number(amount) || 0) * multiplier;
   if (type === 'expense') {
-    if (cardId) adjustBalance('card', cardId, amt);
-    else if (accountId) adjustBalance('acc', accountId, -amt);
-  } else if (type === 'income' && accountId) {
-    adjustBalance('acc', accountId, amt);
-  }
+    if (cardId) adjustBalance_('card', cardId, value);
+    else if (accountId) adjustBalance_('account', accountId, -value);
+  } else if (type === 'income' && accountId) adjustBalance_('account', accountId, value);
 }
 
-function updateTx(id, d) {
-  const sheet = getOrCreateSheet(SHEETS.TX, HEADERS.TX);
-  const rows = sheet.getDataRange().getValues();
-  for (let i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]) !== String(id)) continue;
-    const old = rows[i];
-    applyTxEffect(old[2], old[3], old[8], old[9], -1);
-    const row = [old[0], d.date || old[1], d.type || old[2], d.amount, d.category,
-      d.subcategory || '', d.product || '', d.note || '', d.accountId || '', d.cardId || '',
-      old[10], old[11], old[12]];
-    sheet.getRange(i + 1, 1, 1, row.length).setValues([row]);
-    applyTxEffect(row[2], row[3], row[8], row[9], 1);
-    return json({ success: true });
-  }
-  return json({ success: false, error: 'not found' });
+function isPrivate_(value) {
+  return value === true || String(value).toLowerCase() === 'true' || String(value) === '1';
 }
 
-function deleteTx(id) {
-  const sheet = getOrCreateSheet(SHEETS.TX, HEADERS.TX);
-  const rows = sheet.getDataRange().getValues();
-  for (let i = 1; i < rows.length; i++) {
-    if (String(rows[i][0]) !== String(id)) continue;
-    const old = rows[i];
-    applyTxEffect(old[2], old[3], old[8], old[9], -1); // give the money back
-    sheet.deleteRow(i + 1);
-    if (old[11]) deleteRowSilent(SHEETS.FUEL, old[11]); // linked fuel log
-    return json({ success: true });
-  }
-  return json({ success: false, error: 'not found' });
+/* ================= TRANSACTIONS ================= */
+
+function addTx_(user, data) {
+  if (!data || !data.id || !data.date || !data.type) return { success: false, error: 'Transaction details are incomplete.' };
+  const sheet = getSheet_('TX');
+  if (findRow_(sheet, data.id)) return { success: true, duplicate: true };
+  const ownerId = user.role === 'admin' && data.userId ? String(data.userId) : user.id;
+  const amount = Number(data.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return { success: false, error: 'Enter a valid transaction amount.' };
+  if (!['expense', 'income'].includes(String(data.type))) return { success: false, error: 'Invalid transaction type.' };
+  sheet.appendRow([
+    data.id, data.date, data.type, amount, data.category || '', data.subcategory || '', data.product || '',
+    data.note || '', data.accountId || '', data.cardId || '', ownerId, data.fuelId || '', new Date().toISOString(),
+    data.receiptUrl || '', isPrivate_(data.isPrivate) ? 'true' : 'false'
+  ]);
+  applyTxEffect_(data.type, amount, data.accountId, data.cardId, 1);
+  return { success: true };
 }
 
-function deleteRowSilent(sheetName, id) {
-  const key = Object.keys(SHEETS).find(k => SHEETS[k] === sheetName);
-  const sheet = getOrCreateSheet(sheetName, HEADERS[key]);
-  const data = sheet.getDataRange().getValues();
-  for (let i = 1; i < data.length; i++) {
-    if (String(data[i][0]) === String(id)) { sheet.deleteRow(i + 1); return true; }
-  }
-  return false;
+function updateTx_(user, id, data) {
+  if (!data || typeof data !== 'object') return { success: false, error: 'Invalid transaction data.' };
+  const sheet = getSheet_('TX'), found = findRow_(sheet, id);
+  if (!found) return { success: false, error: 'Transaction not found.' };
+  const old = found.values, h = found.headers.map(x => String(x).trim()), index = name => h.indexOf(name);
+  if (!canAccessRecord_(user, old[index('userId')])) throw new Error('You cannot edit another user’s transaction.');
+  applyTxEffect_(old[index('type')], old[index('amount')], old[index('accountId')], old[index('cardId')], -1);
+  const updated = old.slice();
+  ['date','type','amount','category','subcategory','product','note','accountId','cardId','receiptUrl'].forEach(field => {
+    const i = index(field); if (i >= 0 && data[field] !== undefined) updated[i] = data[field];
+  });
+  const privateIndex = index('isPrivate');
+  if (privateIndex >= 0 && data.isPrivate !== undefined) updated[privateIndex] = isPrivate_(data.isPrivate) ? 'true' : 'false';
+  sheet.getRange(found.rowNumber, 1, 1, updated.length).setValues([updated]);
+  applyTxEffect_(updated[index('type')], updated[index('amount')], updated[index('accountId')], updated[index('cardId')], 1);
+  return { success: true };
 }
 
-function saveBudget(d) {
-  const sheet = getOrCreateSheet(SHEETS.BUDGET, HEADERS.BUDGET);
-  const rows = sheet.getDataRange().getValues();
-  for (let i = 1; i < rows.length; i++) {
-    if (String(rows[i][1]) === String(d.category) && String(rows[i][4] || '') === String(d.userId || '')) {
-      sheet.getRange(i + 1, 3).setValue(parseFloat(d.amount) || 0); // update existing
-      return json({ success: true });
+function deleteTx_(user, id) {
+  const sheet = getSheet_('TX'), found = findRow_(sheet, id);
+  if (!found) return { success: false, error: 'Transaction not found.' };
+  const old = found.values, h = found.headers.map(x => String(x).trim()), index = name => h.indexOf(name);
+  if (!canAccessRecord_(user, old[index('userId')])) throw new Error('You cannot delete another user’s transaction.');
+  applyTxEffect_(old[index('type')], old[index('amount')], old[index('accountId')], old[index('cardId')], -1);
+  const fuelId = old[index('fuelId')]; sheet.deleteRow(found.rowNumber);
+  if (fuelId) deleteRowById_('FUEL', fuelId);
+  return { success: true };
+}
+
+function deleteRowById_(key, id) {
+  const sheet = getSheet_(key), found = findRow_(sheet, id);
+  if (found) sheet.deleteRow(found.rowNumber);
+}
+
+/* ================= CREDIT CARD PAYMENTS ================= */
+
+function addPayment_(user, data) {
+  if (!data || !data.cardId || !data.amount) return { success: false, error: 'Payment details are incomplete.' };
+  const amount = Number(data.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return { success: false, error: 'Enter a valid payment amount.' };
+  const ownerId = user.role === 'admin' && data.userId ? String(data.userId) : user.id;
+  const sheet = getSheet_('PAY'), id = String(data.id || Utilities.getUuid());
+  if (findRow_(sheet, id)) return { success: true, duplicate: true };
+  sheet.appendRow([id, data.date || '', data.cardId, data.accountId || '', amount, data.note || '', ownerId]);
+  adjustBalance_('card', data.cardId, -amount);
+  if (data.accountId) adjustBalance_('account', data.accountId, -amount);
+  return { success: true };
+}
+
+/* ================= FUEL RECORDS ================= */
+
+function addFuel_(user, data) {
+  if (!data || !data.date || !data.total) return { success: false, error: 'Fuel details are incomplete.' };
+  const total = Number(data.total);
+  if (!Number.isFinite(total) || total <= 0) return { success: false, error: 'Enter a valid fuel amount.' };
+  const fuelId = String(data.id || Utilities.getUuid()), fuelSheet = getSheet_('FUEL');
+  if (findRow_(fuelSheet, fuelId)) return { success: true, duplicate: true };
+  fuelSheet.appendRow([
+    fuelId, data.date, data.cardId || '', data.accountId || '', user.id, data.vehicle || '', data.odometer || '',
+    data.liters || '', data.pricePerLiter || '', total, data.fullTank ? 'true' : 'false', data.note || '', data.receiptUrl || ''
+  ]);
+  const txId = Utilities.getUuid();
+  getSheet_('TX').appendRow([
+    txId, data.date, 'expense', total, 'Fuel', data.vehicle || '', data.liters ? '⛽ ' + data.liters + 'L' : '',
+    data.note || '', data.accountId || '', data.cardId || '', user.id, fuelId, new Date().toISOString(),
+    data.receiptUrl || '', isPrivate_(data.isPrivate) ? 'true' : 'false'
+  ]);
+  if (data.cardId) adjustBalance_('card', data.cardId, total);
+  else if (data.accountId) adjustBalance_('account', data.accountId, -total);
+  return { success: true, id: fuelId };
+}
+
+/* ================= USERS AND BUDGETS ================= */
+
+function addUser_(data) {
+  if (!data || !data.name || !data.email) return { success: false, error: 'Name and email are required.' };
+  const sheet = getSheet_('USER'), values = sheet.getDataRange().getValues();
+  const headers = values[0].map(h => String(h).trim().toLowerCase()), emailIndex = headers.indexOf('email');
+  if (emailIndex < 0) throw new Error('Email column is missing from the Users sheet.');
+  const email = String(data.email).trim().toLowerCase();
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][emailIndex] || '').trim().toLowerCase() === email) return { success: false, error: 'That email is already registered.' };
+  }
+  const id = String(data.id || Utilities.getUuid());
+  const row = headers.map(header => {
+    if (header === 'id') return id;
+    if (header === 'name') return data.name;
+    if (header === 'color') return data.color || '#007aff';
+    if (header === 'role') return data.role === 'admin' ? 'admin' : 'user';
+    if (header === 'email') return email;
+    return '';
+  });
+  sheet.appendRow(row);
+  return { success: true };
+}
+
+function saveBudget_(user, data) {
+  if (!data || !data.category) return { success: false, error: 'Budget category is required.' };
+  const ownerId = user.role === 'admin' && data.userId ? String(data.userId) : user.id;
+  const amount = Number(data.amount);
+  if (!Number.isFinite(amount) || amount < 0) return { success: false, error: 'Enter a valid budget amount.' };
+  const sheet = getSheet_('BUDGET'), values = sheet.getDataRange().getValues();
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][1]) === String(data.category) && String(values[i][4] || '') === ownerId) {
+      sheet.getRange(i + 1, 3).setValue(amount);
+      if (values[i][3] !== (data.period || 'monthly')) sheet.getRange(i + 1, 4).setValue(data.period || 'monthly');
+      return { success: true };
     }
   }
-  sheet.appendRow([d.id || Utilities.getUuid(), d.category, parseFloat(d.amount) || 0, d.period || 'monthly', d.userId || '']);
-  return json({ success: true });
+  sheet.appendRow([data.id || Utilities.getUuid(), data.category, amount, data.period || 'monthly', ownerId]);
+  return { success: true };
 }
 
-function json(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
+function deleteBudget_(user, id) {
+  const sheet = getSheet_('BUDGET'), found = findRow_(sheet, id);
+  if (!found) return { success: false, error: 'Budget not found.' };
+  if (!canAccessRecord_(user, found.values[4])) throw new Error('You cannot delete another user’s budget.');
+  sheet.deleteRow(found.rowNumber);
+  return { success: true };
 }
-// ==========================================
-// STANDALONE: Reload default categories
-// ==========================================
-function resetCategories() {
-  const s = getOrCreateSheet(SHEETS.CAT, HEADERS.CAT);
-  if (s.getLastRow() > 1) {
-    s.getRange(2, 1, s.getLastRow(), HEADERS.CAT.length).clearContent();
+
+/* ================= PRIVATE RECEIPT UPLOAD ================= */
+
+function getReceiptsFolder_() {
+  const props = PropertiesService.getScriptProperties(), folderId = props.getProperty('RECEIPTS_FOLDER_ID');
+  if (folderId) { try { return DriveApp.getFolderById(folderId); } catch (ignored) {} }
+  const folder = DriveApp.createFolder('Jamshi_Receipts_' + SpreadsheetApp.getActiveSpreadsheet().getId().slice(-6));
+  props.setProperty('RECEIPTS_FOLDER_ID', folder.getId());
+  return folder;
+}
+
+function uploadReceipt_(user, data) {
+  if (!data || !data.base64) return { success: false, error: 'No receipt file was supplied.' };
+  try {
+    const bytes = Utilities.base64Decode(data.base64);
+    const blob = Utilities.newBlob(bytes, data.mimeType || 'application/octet-stream', data.name || 'receipt');
+    const file = getReceiptsFolder_().createFile(blob), userSheet = getSheet_('USER');
+    const values = userSheet.getDataRange().getValues(), headers = values[0].map(h => String(h).trim().toLowerCase());
+    const emailIndex = headers.indexOf('email');
+    if (emailIndex >= 0) {
+      values.slice(1).forEach(row => {
+        const email = String(row[emailIndex] || '').trim();
+        if (email) { try { file.addViewer(email); } catch (ignored) {} }
+      });
+    }
+    return { success: true, url: file.getUrl(), fileId: file.getId() };
+  } catch (err) {
+    return { success: false, error: safeError_(err) };
   }
-  seedCategories();
-  SpreadsheetApp.getActive().toast('✅ Categories reset to defaults!');
+}
+
+/* ================= RESPONSE HELPERS ================= */
+
+function safeError_(err) {
+  const message = err && err.message ? err.message : String(err || 'Unknown error');
+  return message.substring(0, 300);
+}
+
+function json(data) {
+  return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(ContentService.MimeType.JSON);
 }
