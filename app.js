@@ -325,7 +325,7 @@ function renderAll() {
   $('user-label').textContent = `${state.user?.name || ''}${isAdmin() ? ' · Admin' : ''}`;
   $('admin-only').classList.toggle('hidden', !isAdmin());
   document.querySelectorAll('.admin-action').forEach(el => el.classList.toggle('hidden', !isAdmin()));
-  renderDashboard(); renderHistory(); renderAccounts(); renderLoans(); renderSelects(); renderBudgets(); renderAdmin(); uxForm();
+  renderDashboard(); renderHistory(); renderAccounts(); renderLoans(); renderSelects(); renderBudgets(); renderAdmin(); uxSettingsUI(); uxForm();
   if (!UXS.restored && state.accounts.length) { uxRestoreLast(); UXS.restored = true; }
 }
 
@@ -873,7 +873,34 @@ document.addEventListener('click', e => {
   if (p && !p.disabled) { UXM.offset = Math.min(0, UXM.offset + (+p.dataset.per === -1 ? -1 : 1)); renderDashboard(); return; }
   if (e.target.closest('[data-perset]') || e.target.closest('#btn-monthstart')) uxStartDayForm();
 });
-(function () {
-  const panel = document.querySelector('#view-settings .settings-panel');
-  if (panel) panel.insertAdjacentHTML('afterbegin', '<button id="btn-monthstart" class="secondary wide">📅 Month start day (salary day)</button><hr>');
-})();
+
+
+
+/* ===== Professional Settings page ===== */
+function uxSettingsUI() {
+  const u = state.user || {};
+  $('set-name').textContent = u.name || '—'; $('set-role').textContent = u.role === 'admin' ? 'Administrator' : 'Member';
+  const av = $('set-avatar'); av.textContent = (u.name || '?').trim().charAt(0).toUpperCase(); av.style.background = u.color || '#1769e0';
+  const d = uxStartDay(), sfx = (d % 10 === 1 && d !== 11) ? 'st' : (d % 10 === 2 && d !== 12) ? 'nd' : (d % 10 === 3 && d !== 13) ? 'rd' : 'th';
+  $('set-startday').textContent = d + sfx;
+  const off = $('status').classList.contains('offline'), c = $('set-conn'); c.textContent = off ? '● Offline' : '● Connected'; c.classList.toggle('off', off);
+}
+function renderAdmin() {
+  const box = $('categories-list'), open = new Set([...box.querySelectorAll('details[open]')].map(d => d.dataset.k));
+  let mainN = 0, subN = 0;
+  const tree = ['expense', 'income'].map(t => {
+    const rows = uxCatList(t).map(c => {
+      const subs = subsFor(c.name); mainN++; subN += subs.length;
+      return `<details class="cat-item" data-k="${t}|${esc(c.name)}"><summary><span class="ci">${catIcon(c.name)}</span><b>${esc(c.name)}</b><small>${subs.length}</small></summary><div class="sub-list">${subs.map(s => `<span class="sub-pill">${s.icon ? s.icon + ' ' : ''}${esc(s.name)}</span>`).join('') || '<em>No subcategories yet</em>'}<button type="button" class="mini-add" data-addsub="${esc(c.name)}" data-addtype="${t}">＋ Add sub</button></div></details>`;
+    }).join('');
+    return `<h4 class="cat-type">${t === 'expense' ? '💸 Expense' : '💰 Income'}</h4>${rows}`;
+  }).join('');
+  box.innerHTML = `<details class="set-fold" data-k="all"><summary><span class="ico">📂</span><span class="lbl">Browse categories<small>${mainN} main · ${subN} subcategories</small></span><i>›</i></summary><div class="tree">${tree}</div></details>`;
+  box.querySelectorAll('details').forEach(d => { if (open.has(d.dataset.k)) d.open = true; });
+  if (!isAdmin()) return;
+  $('users-list').innerHTML = state.users.map(u => `<div class="user-row"><div class="avatar sm" style="background:${esc(u.color || '#007aff')}">${esc((u.name || '?').charAt(0).toUpperCase())}</div><div class="u-main"><b>${esc(u.name)}</b><small>${esc(u.email || 'No email yet')}</small></div><span class="badge ${u.role === 'admin' ? 'adm' : ''}">${esc(u.role || 'user')}</span></div>`).join('') || '<p class="empty">No users yet.</p>';
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-addsub]');
+  if (b) uxCatForm(b.dataset.addtype || 'expense', b.dataset.addsub);
+});
