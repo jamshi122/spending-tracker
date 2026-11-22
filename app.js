@@ -17,7 +17,7 @@ const $ = id => document.getElementById(id);
 const num = v => Number.parseFloat(v) || 0;
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money = v => `${CURRENCY} ${num(v).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
-const today = () => new Date().toISOString().slice(0,10);
+const today = () => { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
 
 function toast(message, kind='info') {
@@ -337,7 +337,7 @@ function txRow(t) {
 function renderDashboard() {
   const cash = state.accounts.reduce((s, a) => s + num(a.balance), 0);
   const debt = state.cards.reduce((s, c) => s + Math.max(0, num(c.balance)), 0);
-  const recent = last30().filter(t => !isLoanTx(t));
+  const P = uxPeriod(UXM.offset), recent = state.transactions.filter(t => inPeriod(t, P) && !isLoanTx(t));
   const LS = uxLoans(), loanOwe = LS.owe.reduce((s, p) => s + Math.max(0, p.total), 0), loanLent = LS.lent.reduce((s, p) => s + Math.max(0, p.total), 0);
   const income = recent.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
   const expense = recent.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
@@ -349,18 +349,19 @@ function renderDashboard() {
     const owed = Math.max(0, num(c.balance)), lim = num(c.limit), avail = Math.max(0, lim - owed);
     const pct = lim > 0 ? Math.min(100, owed / lim * 100) : 0;
     const ow = userName(c.owner), owner = ow === '—' ? (c.owner || '') : ow;
-    return `<article class="credit-card" style="--card-color:${esc(c.color || '#334155')}"><div class="card-top"><span>💳 ${esc(c.name)}</span><span>•••• ${esc(c.last4 || '')}</span></div><div class="card-balance ${owed > 0 ? 'liability' : ''}">${owed > 0 ? '−' : ''}${money(owed)}</div><small>You owe · ${esc(owner)}</small><div class="bar"><i style="width:${pct}%"></i></div><div class="card-limit">Available ${money(avail)} of ${money(lim)}</div></article>`;
+    return `<article class="credit-card" style="--card-color:${esc(c.color || '#334155')}"><div class="card-top"><span>💳 ${esc(c.name)}</span><span>•••• ${esc(c.last4 || '')}</span></div><div class="card-balance ${owed > 0 ? 'liability' : ''}">${owed > 0 ? '−' : ''}${money(owed)}</div><small>You owe · ${esc(owner)}</small><div class="bar"><i style="width:${pct}%"></i></div><div class="card-limit">Available ${money(avail)} of ${money(lim)}${uxDue(c)}</div></article>`;
   }).join('') : '<p class="empty">No credit cards added yet.</p>';
   const groups = {}; recent.filter(t => t.type === 'expense').forEach(t => { const k = t.category || 'Other'; groups[k] = (groups[k] || 0) + t.amount; });
   const top = Object.entries(groups).sort((a, b) => b[1] - a[1]).slice(0, 6);
-  const ym = today().slice(0, 7), month = {};
-  state.transactions.filter(t => t.type === 'expense' && String(t.date).startsWith(ym)).forEach(t => { month[t.category] = (month[t.category] || 0) + t.amount; });
+  const month = {};
+  state.transactions.filter(t => t.type === 'expense' && !isLoanTx(t) && inPeriod(t, P)).forEach(t => { month[t.category] = (month[t.category] || 0) + t.amount; });
   const rows = top.map(([k, v]) => `<div class="summary-row"><span>${catIcon(k)} ${esc(k)}</span><b>${money(v)}</b></div>`).join('');
-  const buds = state.budgets.map(b => {
+  const buds = state.budgets.filter(b => b.category !== '__monthstart').map(b => {
     const sp = month[b.category] || 0, amt = num(b.amount), pct = amt > 0 ? Math.min(100, sp / amt * 100) : 0;
     return `<div class="bud"><div class="summary-row"><span>${catIcon(b.category)} ${esc(b.category)} budget</span><b>${money(sp)} / ${money(amt)}</b></div><div class="bar ${sp > amt ? 'over' : ''}"><i style="width:${pct}%"></i></div></div>`;
   }).join('');
-  $('category-summary').innerHTML = (rows || '<p class="empty">No expenses in the last 30 days.</p>') + (buds ? '<h3 class="mini-title">Budgets this month</h3>' + buds : '');
+  $('category-summary').innerHTML = (rows || '<p class="empty">No expenses in the last 30 days.</p>') + (buds ? '<h3 class="mini-title">Budgets this period</h3>' + buds : '');
+  uxDashPeriodUI(P);
   $('recent-list').innerHTML = state.transactions.slice().sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 8).map(txRow).join('') || '<p class="empty">No transactions yet.</p>';
 }
 
@@ -790,12 +791,12 @@ function uxHistInit() {
 function renderHistory() {
   uxHistInit();
   const q = lc($('search').value || ''), type = $('history-type').value, mSel = $('history-month'), cSel = $('history-cat'), mCur = mSel.value, cCur = cSel.value;
-  const months = [...new Set(state.transactions.map(t => String(t.date).slice(0, 7)).filter(Boolean))].sort().reverse();
+  const SD = uxStartDay(), months = [...new Set([...state.transactions.map(t => String(t.date).slice(0, 10)).filter(Boolean), today()].map(d => uxPeriodOfDate(d, SD).start))].sort().reverse();
   const cats = [...new Set(state.transactions.map(t => t.category).filter(Boolean))].sort();
-  mSel.innerHTML = '<option value="">All time</option>' + months.map(m => `<option value="${m}">${uxMonth(m)}</option>`).join('');
+  mSel.innerHTML = '<option value="">All time</option>' + months.map((m, i) => `<option value="${m}">${uxPeriodLabel(uxPeriodOfDate(m, SD))}${m === uxPeriod(0).start ? ' (current)' : ''}</option>`).join('');
   cSel.innerHTML = '<option value="">All categories</option>' + cats.map(c => `<option value="${esc(c)}">${catIcon(c)} ${esc(c)}</option>`).join('');
   mSel.value = months.includes(mCur) ? mCur : ''; cSel.value = cats.includes(cCur) ? cCur : '';
-  const rows = state.transactions.slice().reverse().filter(t => (type === 'all' || t.type === type) && (!mSel.value || String(t.date).startsWith(mSel.value)) && (!cSel.value || t.category === cSel.value) && (!q || [t.category, t.subcategory, t.product, t.note, t.date].join(' ').toLowerCase().includes(q))).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const rows = state.transactions.slice().reverse().filter(t => (type === 'all' || t.type === type) && (!mSel.value || inPeriod(t, uxPeriodOfDate(mSel.value, SD))) && (!cSel.value || t.category === cSel.value) && (!q || [t.category, t.subcategory, t.product, t.note, t.date].join(' ').toLowerCase().includes(q))).sort((a, b) => String(b.date).localeCompare(String(a.date)));
   const sum = ty => rows.filter(t => t.type === ty && !isLoanTx(t)).reduce((s, t) => s + t.amount, 0);
   let html = `<div class="hist-sum"><span>${rows.length} transactions</span><span class="pos">+${money(sum('income'))}</span><span class="neg">−${money(sum('expense'))}</span></div>`, last = '';
   rows.slice(0, HS.limit).forEach(t => { const d = String(t.date).slice(0, 10); if (d !== last) { html += `<div class="day-head">${uxDay(d)}</div>`; last = d; } html += txRow(t); });
@@ -804,3 +805,75 @@ function renderHistory() {
 }
 
 uxForm();
+
+
+/* ===== Custom month start day (e.g. salary on the 25th) ===== */
+const UXM = { offset: 0 };
+function uxDim(y, m) { return new Date(y, m + 1, 0).getDate(); }
+function uxIso(y, m, d) { return y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0'); }
+function uxAddDays(ds, n) { const d = new Date(ds + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+function uxStartDay() {
+  const b = state.budgets.find(x => x.category === '__monthstart' && String(x.userId || '') === String(state.user?.id || ''));
+  if (b && num(b.amount) >= 1) return Math.min(31, Math.round(num(b.amount)));
+  let l = 1; try { l = parseInt(localStorage.getItem('jamshi-startday'), 10); } catch (e) {}
+  return l >= 1 && l <= 31 ? l : 1;
+}
+function uxPeriodOfDate(ds, D) {
+  let y = +ds.slice(0, 4), m = +ds.slice(5, 7) - 1; const d = +ds.slice(8, 10);
+  if (d < Math.min(D, uxDim(y, m))) { m--; if (m < 0) { m = 11; y--; } }
+  const start = uxIso(y, m, Math.min(D, uxDim(y, m)));
+  let ny = y, nm = m + 1; if (nm > 11) { nm = 0; ny++; }
+  return { start, end: uxAddDays(uxIso(ny, nm, Math.min(D, uxDim(ny, nm))), -1) };
+}
+function uxPeriod(offset) {
+  const D = uxStartDay(); let p = uxPeriodOfDate(today(), D);
+  for (let i = 0; i < Math.abs(offset || 0); i++) p = uxPeriodOfDate(uxAddDays(p.start, -1), D);
+  return p;
+}
+function inPeriod(t, P) { const d = String(t.date).slice(0, 10); return d >= P.start && d <= P.end; }
+function uxPeriodLabel(P) {
+  const f = (ds, y) => new Date(ds + 'T00:00:00').toLocaleDateString('en', y ? { day: 'numeric', month: 'short', year: 'numeric' } : { day: 'numeric', month: 'short' });
+  return f(P.start) + ' – ' + f(P.end, true);
+}
+function uxDue(c) {
+  if (num(c.balance) <= 0) return '';
+  const D = parseInt(c.dueDay, 10); if (!(D >= 1 && D <= 31)) return '';
+  const t = today(); let y = +t.slice(0, 4), m = +t.slice(5, 7) - 1; const d = +t.slice(8, 10), cm = m;
+  let due = Math.min(D, uxDim(y, m));
+  if (d > due) { m++; if (m > 11) { m = 0; y++; } due = Math.min(D, uxDim(y, m)); }
+  const days = Math.round((new Date(y, m, due) - new Date(y, cm, d)) / 864e5);
+  return ' · Due ' + (days === 0 ? 'today' : days === 1 ? 'tomorrow' : 'in ' + days + ' days');
+}
+function uxDashPeriodUI(P) {
+  let bar = $('period-bar');
+  if (!bar) { bar = document.createElement('div'); bar.id = 'period-bar'; bar.className = 'period-bar'; document.querySelector('#view-dashboard .metric-grid').insertAdjacentElement('beforebegin', bar); }
+  bar.innerHTML = `<button data-per="-1" aria-label="Previous period">‹</button><button class="per-label" data-perset="1">📅 ${uxPeriodLabel(P)}<small>${UXM.offset === 0 ? 'Current period' : 'Past period'} · month starts on day ${uxStartDay()}</small></button><button data-per="1" aria-label="Next period" ${UXM.offset >= 0 ? 'disabled' : ''}>›</button>`;
+  [['income-total', 'Income'], ['expense-total', 'Spent'], ['saved-total', 'Net saved']].forEach(([id, t]) => { const el = $(id).previousElementSibling; if (el) el.textContent = t; });
+  const h = $('category-summary').previousElementSibling?.querySelector('span'); if (h) h.textContent = 'This period';
+}
+function renderBudgets() {
+  $('budget-list').innerHTML = state.budgets.filter(b => b.category !== '__monthstart').map(b => `<div class="summary-row"><span>${catIcon(b.category)} ${esc(b.category)} · per period</span><b>${money(b.amount)}</b></div>`).join('') || '<p class="empty">No budgets set.</p>';
+}
+function uxStartDayForm() {
+  uxSheet(`<h3>📅 Month starts on day</h3><p>Your month runs from this day to the day before the next one. Example: 25 gives 25 Oct – 24 Nov.</p><div class="lf"><label>Day of month (1–31)</label><input id="sd-day" type="number" inputmode="numeric" min="1" max="31" value="${uxStartDay()}"></div><div class="sheet-btns"><button data-save="1" class="save-btn">Save</button><button data-close>Cancel</button></div>`,
+    async (e, close) => {
+      if (!e.target.closest('[data-save]')) return;
+      const d = Math.round(num($('sd-day').value)); if (d < 1 || d > 31) return toast('Enter a day from 1 to 31.', 'error');
+      close(); UXM.offset = 0; HS.limit = 60;
+      try { localStorage.setItem('jamshi-startday', String(d)); } catch (err) {}
+      const uid_ = String(state.user?.id || ''), row = state.budgets.find(x => x.category === '__monthstart' && String(x.userId || '') === uid_);
+      if (row) row.amount = d; else state.budgets.push({ id: uid(), category: '__monthstart', amount: d, period: 'monthly', userId: uid_ });
+      renderAll(); toast('Saved ✓', 'success');
+      try { await api('saveBudget', { data: { category: '__monthstart', amount: d, period: 'monthly' } }); } catch (err) { toast('Saved on this phone only: ' + err.message, 'error'); }
+      uxSync();
+    });
+}
+document.addEventListener('click', e => {
+  const p = e.target.closest('[data-per]');
+  if (p && !p.disabled) { UXM.offset = Math.min(0, UXM.offset + (+p.dataset.per === -1 ? -1 : 1)); renderDashboard(); return; }
+  if (e.target.closest('[data-perset]') || e.target.closest('#btn-monthstart')) uxStartDayForm();
+});
+(function () {
+  const panel = document.querySelector('#view-settings .settings-panel');
+  if (panel) panel.insertAdjacentHTML('afterbegin', '<button id="btn-monthstart" class="secondary wide">📅 Month start day (salary day)</button><hr>');
+})();
