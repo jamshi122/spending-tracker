@@ -847,7 +847,7 @@ function uxDue(c) {
 function uxDashPeriodUI(P) {
   let bar = $('period-bar');
   if (!bar) { bar = document.createElement('div'); bar.id = 'period-bar'; bar.className = 'period-bar'; document.querySelector('#view-dashboard .metric-grid').insertAdjacentElement('beforebegin', bar); }
-  bar.innerHTML = `<button data-per="-1" aria-label="Previous period">‹</button><button class="per-label" data-perset="1">📅 ${uxPeriodLabel(P)}<small>${UXM.offset === 0 ? 'Current period' : 'Past period'} · month starts on day ${uxStartDay()}</small></button><button data-per="1" aria-label="Next period" ${UXM.offset >= 0 ? 'disabled' : ''}>›</button>`;
+  bar.innerHTML = `<button data-per="-1" aria-label="Previous period">‹</button><button class="per-label" data-perset="1">📅 ${uxPeriodLabel(P)}<small>${UXM.offset === 0 ? 'Current period' : 'Past period'} · month starts on day ${uxStartDay()}</small></button><button data-per="1" aria-label="Next period" ${UXM.offset >= 0 ? 'disabled' : ''}>›</button><button data-report="1" data-from="${P.start}" data-to="${P.end}" aria-label="Report">📄</button>`;
   [['income-total', 'Income'], ['expense-total', 'Spent'], ['saved-total', 'Net saved']].forEach(([id, t]) => { const el = $(id).previousElementSibling; if (el) el.textContent = t; });
   const h = $('category-summary').previousElementSibling?.querySelector('span'); if (h) h.textContent = 'This period';
 }
@@ -903,4 +903,105 @@ function renderAdmin() {
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-addsub]');
   if (b) uxCatForm(b.dataset.addtype || 'expense', b.dataset.addsub);
+});
+
+
+/* ===== Printable report (any date range) ===== */
+const RP = { from: '', to: '', subs: true, list: false, title: '' };
+const rpFmt = ds => new Date(ds + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+const rpSigned = v => (v < 0 ? '−' : '') + money(Math.abs(v));
+function uxReportData(from, to) {
+  const rows = state.transactions.filter(t => { const d = String(t.date).slice(0, 10); return d >= from && d <= to; });
+  const core = rows.filter(t => !isLoanTx(t));
+  const agg = type => {
+    const cats = {};
+    core.filter(t => t.type === type).forEach(t => {
+      const c = String(t.category || '').trim() || 'Uncategorised', o = cats[c] = cats[c] || { name: c, total: 0, count: 0, subs: {} };
+      o.total += t.amount; o.count++;
+      const sn = String(t.subcategory || '').trim();
+      if (sn) { const so = o.subs[sn] = o.subs[sn] || { name: sn, total: 0, count: 0 }; so.total += t.amount; so.count++; }
+    });
+    return Object.values(cats).filter(c => c.total > 0).sort((a, b) => b.total - a.total);
+  };
+  const inc = agg('income'), exp = agg('expense'), sum = l => l.reduce((s, c) => s + c.total, 0);
+  const loan = { borrowed: 0, repaid: 0, lent: 0, back: 0 };
+  rows.filter(isLoanTx).forEach(t => { if (t.category === 'Loan Borrowed') loan.borrowed += t.amount; else if (t.category === 'Loan Repayment') loan.repaid += t.amount; else if (t.category === 'Loan Given') loan.lent += t.amount; else loan.back += t.amount; });
+  return { rows, core, inc, exp, income: sum(inc), expense: sum(exp), loan };
+}
+function rpCatTable(list, total, type) {
+  const body = list.map(c => {
+    const pct = total > 0 ? c.total / total * 100 : 0;
+    let h = `<tr class="rp-cat"><td><span class="rp-ic">${catIcon(c.name)}</span>${esc(c.name)}<div class="rp-bar2"><i class="${type}" style="width:${pct.toFixed(1)}%"></i></div></td><td class="n">${c.count}</td><td class="n">${money(c.total)}</td><td class="n">${pct.toFixed(1)}%</td></tr>`;
+    if (RP.subs) {
+      const subs = Object.values(c.subs).sort((a, b) => b.total - a.total), rest = c.total - subs.reduce((s, x) => s + x.total, 0), restN = c.count - subs.reduce((s, x) => s + x.count, 0);
+      const r = subs.map(x => [x.name, x.count, x.total]); if (subs.length && rest > 0.005) r.push(['No subcategory', restN, rest]);
+      h += r.map(x => `<tr class="rp-sub"><td>${esc(x[0])}</td><td class="n">${x[1]}</td><td class="n">${money(x[2])}</td><td class="n">${(c.total > 0 ? x[2] / c.total * 100 : 0).toFixed(0)}%</td></tr>`).join('');
+    }
+    return h;
+  }).join('');
+  return `<table class="rp-t"><thead><tr><th>Category</th><th class="n">Txns</th><th class="n">Amount</th><th class="n">Share</th></tr></thead><tbody>${body}<tr class="rp-total"><td>Total</td><td class="n">${list.reduce((s, c) => s + c.count, 0)}</td><td class="n">${money(total)}</td><td class="n">100%</td></tr></tbody></table>`;
+}
+function uxReportHTML(from, to) {
+  const D = uxReportData(from, to), days = Math.round((new Date(to + 'T00:00:00') - new Date(from + 'T00:00:00')) / 864e5) + 1;
+  const net = D.income - D.expense, rate = D.income > 0 ? (net / D.income * 100).toFixed(1) + '%' : '—';
+  const L = uxLoans(), loanNet = L.lent.reduce((s, p) => s + Math.max(0, p.total), 0) - L.owe.reduce((s, p) => s + Math.max(0, p.total), 0);
+  const cash = state.accounts.reduce((s, a) => s + num(a.balance), 0), debt = state.cards.reduce((s, c) => s + Math.max(0, num(c.balance)), 0);
+  const SD = uxStartDay(), per = uxPeriodOfDate(from, SD), isPeriod = per.start === from && per.end === to;
+  let h = `<div class="rp-head"><div><h1>Spending Report</h1><small>${rpFmt(from)} – ${rpFmt(to)} · ${days} day${days > 1 ? 's' : ''}</small><small>Prepared for ${esc(state.user?.name || '')}</small></div><div class="rp-logo">JS</div></div>`;
+  h += `<div class="rp-kpis"><div class="rp-kpi in"><small>Total income</small><b>${money(D.income)}</b></div><div class="rp-kpi out"><small>Total expenses</small><b>${money(D.expense)}</b></div><div class="rp-kpi"><small>Net saved</small><b class="${net < 0 ? 'neg-t' : 'pos-t'}">${rpSigned(net)}</b></div><div class="rp-kpi"><small>Savings rate</small><b>${rate}</b></div><div class="rp-kpi"><small>Avg daily spending</small><b>${money(D.expense / days)}</b></div><div class="rp-kpi"><small>Transactions</small><b>${D.core.length}</b></div></div>`;
+  if (!D.rows.length) return h + '<p class="rp-note">No transactions in this date range.</p>';
+  if (D.inc.length) h += `<h2 class="rp-sec">💰 Income summary</h2>${rpCatTable(D.inc, D.income, 'income')}`;
+  if (D.exp.length) h += `<h2 class="rp-sec">💸 Expense summary</h2>${rpCatTable(D.exp, D.expense, 'expense')}`;
+  if (D.core.some(t => !String(t.category || '').trim())) h += '<p class="rp-note">“Uncategorised” holds transactions saved without a category, so totals still match.</p>';
+  const lo = D.loan;
+  if (lo.borrowed + lo.repaid + lo.lent + lo.back > 0) h += `<h2 class="rp-sec">🤝 Loan activity <small>(not counted in income or expenses)</small></h2><table class="rp-t"><tbody>${lo.borrowed ? `<tr><td>Money borrowed</td><td class="n">${money(lo.borrowed)}</td></tr>` : ''}${lo.repaid ? `<tr><td>Loan repayments made</td><td class="n">${money(lo.repaid)}</td></tr>` : ''}${lo.lent ? `<tr><td>Money lent to others</td><td class="n">${money(lo.lent)}</td></tr>` : ''}${lo.back ? `<tr><td>Money received back</td><td class="n">${money(lo.back)}</td></tr>` : ''}</tbody></table>`;
+  const spent = {}; D.exp.forEach(c => { spent[lc(c.name)] = c.total; });
+  const buds = state.budgets.filter(b => b.category !== '__monthstart' && (spent[lc(b.category)] || 0) > 0);
+  if (isPeriod && buds.length) {
+    h += `<h2 class="rp-sec">🎯 Budget vs actual</h2><table class="rp-t"><thead><tr><th>Category</th><th class="n">Budget</th><th class="n">Spent</th><th class="n">Left</th></tr></thead><tbody>${buds.map(b => { const sp = spent[lc(b.category)] || 0, left = num(b.amount) - sp; return `<tr><td>${catIcon(b.category)} ${esc(b.category)}</td><td class="n">${money(b.amount)}</td><td class="n">${money(sp)}</td><td class="n ${left < 0 ? 'neg-t' : 'pos-t'}">${rpSigned(left)}</td></tr>`; }).join('')}</tbody></table>`;
+  }
+  h += `<h2 class="rp-sec">📌 Position today <small>(${rpFmt(today())})</small></h2><table class="rp-t"><tbody><tr><td>Cash &amp; bank</td><td class="n">${money(cash)}</td></tr><tr><td>Credit card debt</td><td class="n">${money(debt)}</td></tr><tr><td>Loans (net)</td><td class="n">${rpSigned(loanNet)}</td></tr><tr class="rp-total"><td>Net worth</td><td class="n">${rpSigned(cash - debt + loanNet)}</td></tr></tbody></table>`;
+  if (RP.list) {
+    const items = D.rows.slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    h += `<h2 class="rp-sec">🧾 All transactions (${items.length})</h2><table class="rp-t"><thead><tr><th>Date</th><th>Category</th><th>Details</th><th class="n">Amount</th></tr></thead><tbody>${items.map(t => `<tr><td>${esc(String(t.date).slice(5, 10))}</td><td>${esc(t.category || '—')}${t.subcategory ? ' · ' + esc(t.subcategory) : ''}</td><td>${esc(t.product || t.note || '')}</td><td class="n ${t.type === 'income' ? 'pos-t' : 'neg-t'}">${t.type === 'income' ? '+' : '−'}${money(t.amount)}</td></tr>`).join('')}</tbody></table>`;
+  }
+  return h + `<div class="rp-foot"><span>Jamshi Solution · Spending Tracker</span><span>Generated ${rpFmt(today())}</span></div>`;
+}
+function uxReportRender() {
+  if (RP.from > RP.to) { const t = RP.from; RP.from = RP.to; RP.to = t; }
+  $('rp-from').value = RP.from; $('rp-to').value = RP.to;
+  $('rp-paper').innerHTML = uxReportHTML(RP.from, RP.to);
+  document.title = 'Spending Report ' + RP.from + ' to ' + RP.to;
+}
+function uxReportOpen(from, to) {
+  let o = $('report-overlay');
+  if (!o) {
+    o = document.createElement('div'); o.id = 'report-overlay';
+    o.innerHTML = `<div class="rp-bar"><button type="button" data-rp="close">✕ Close</button><b>Report</b><button type="button" class="primary" data-rp="print">🖨️ Print / PDF</button></div><div class="rp-controls"><div class="rp-dates"><label>From<input type="date" id="rp-from"></label><label>To<input type="date" id="rp-to"></label></div><div class="rp-chips"><button type="button" data-rp-range="period">This period</button><button type="button" data-rp-range="lastperiod">Last period</button><button type="button" data-rp-range="month">This month</button><button type="button" data-rp-range="lastmonth">Last month</button><button type="button" data-rp-range="three">Last 3 periods</button><button type="button" data-rp-range="year">This year</button></div><label class="rp-opt"><input type="checkbox" id="rp-subs" checked> Show subcategories</label><label class="rp-opt"><input type="checkbox" id="rp-list"> Include full transaction list</label><p class="rp-hint">Save as PDF on iPhone: tap <b>Print / PDF</b>, pinch OUT on the preview with two fingers, then tap the Share button and choose <b>Save to Files</b>.</p></div><div id="rp-paper"></div>`;
+    document.body.appendChild(o);
+    o.addEventListener('click', e => {
+      const a = e.target.closest('[data-rp]')?.dataset.rp, r = e.target.closest('[data-rp-range]')?.dataset.rpRange;
+      if (a === 'close') { o.className = ''; document.body.classList.remove('rp-open'); document.title = 'Jamshi Solution – Spending Tracker'; }
+      if (a === 'print') window.print();
+      if (r) {
+        const t = new Date(), y = t.getFullYear(), m = t.getMonth(), cur = uxPeriod(0);
+        const mo = (yy, mm) => [uxIso(yy, mm, 1), uxIso(yy, mm, uxDim(yy, mm))];
+        const R = { period: [cur.start, cur.end], lastperiod: [uxPeriod(-1).start, uxPeriod(-1).end], month: mo(y, m), lastmonth: m ? mo(y, m - 1) : mo(y - 1, 11), three: [uxPeriod(-2).start, cur.end], year: [y + '-01-01', y + '-12-31'] }[r];
+        RP.from = R[0]; RP.to = R[1]; uxReportRender();
+      }
+    });
+    o.addEventListener('change', e => {
+      if (e.target.id === 'rp-from') RP.from = e.target.value || RP.from;
+      if (e.target.id === 'rp-to') RP.to = e.target.value || RP.to;
+      if (e.target.id === 'rp-subs') RP.subs = e.target.checked;
+      if (e.target.id === 'rp-list') RP.list = e.target.checked;
+      uxReportRender();
+    });
+  }
+  const P = uxPeriod(UXM.offset || 0); RP.from = from || P.start; RP.to = to || P.end;
+  o.className = 'open'; document.body.classList.add('rp-open'); o.scrollTop = 0; uxReportRender();
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-report]'); if (b) return uxReportOpen(b.dataset.from, b.dataset.to);
+  if (e.target.closest('#btn-report')) uxReportOpen();
 });
