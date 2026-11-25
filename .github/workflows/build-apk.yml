@@ -61,22 +61,29 @@ jobs:
           cd apk-build/android
           chmod +x gradlew
           ./gradlew assembleDebug
-          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
-          if [ ! -f "$APK_PATH" ]; then
-            echo "ERROR: APK not found at $APK_PATH"
+          BUILT_APK="$(find app/build/outputs/apk/debug -name '*.apk' -type f | head -n 1)"
+          if [ -z "$BUILT_APK" ] || [ ! -f "$BUILT_APK" ]; then
+            echo "ERROR: No debug APK found under app/build/outputs/apk/debug"
+            find app/build -maxdepth 5 || true
             exit 1
           fi
-          cp "$APK_PATH" ../../SpendingTracker-debug.apk
-          ls -lh ../../SpendingTracker-debug.apk
+          cp "$BUILT_APK" "$GITHUB_WORKSPACE/SpendingTracker-debug.apk"
+          ls -lh "$GITHUB_WORKSPACE/SpendingTracker-debug.apk"
 
       - name: Publish direct APK to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -e
+          APK_FILE="$GITHUB_WORKSPACE/SpendingTracker-debug.apk"
+          if [ ! -f "$APK_FILE" ]; then
+            echo "ERROR: Missing $APK_FILE"
+            exit 1
+          fi
+          ls -lh "$APK_FILE"
           if gh release view latest-apk >/dev/null 2>&1; then
-            gh release upload latest-apk apk-build/SpendingTracker-debug.apk --clobber
+            gh release upload latest-apk "$APK_FILE" --clobber
             gh release edit latest-apk --title "Spending Tracker Latest APK" --latest
           else
-            gh release create latest-apk apk-build/SpendingTracker-debug.apk --title "Spending Tracker Latest APK" --notes "Latest debug APK build for Spending Tracker" --latest
+            gh release create latest-apk "$APK_FILE" --title "Spending Tracker Latest APK" --notes "Latest debug APK build for Spending Tracker" --latest
           fi
