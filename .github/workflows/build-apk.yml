@@ -7,7 +7,7 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-apk:
@@ -35,11 +35,11 @@ jobs:
           set -e
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
 
-      - name: Create Capacitor wrapper
+      - name: Bundle web files into Capacitor wrapper
         run: |
           set -e
           mkdir -p apk-build/www
-          echo "Loading Spending Tracker..." > apk-build/www/index.html
+          cp index.html app.js style.css style.js manifest.json logo.svg *.png apk-build/www/
           cd apk-build
           npm init -y
           npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6
@@ -48,11 +48,7 @@ jobs:
           {
             "appId": "com.jamshi122.spendingtracker",
             "appName": "Spending Tracker",
-            "webDir": "www",
-            "server": {
-              "url": "https://jamshi122.github.io/mypersonal/",
-              "cleartext": false
-            }
+            "webDir": "www"
           }
           EOF
           npx cap add android
@@ -63,9 +59,12 @@ jobs:
           cd apk-build/android
           chmod +x gradlew
           ./gradlew assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk ../../SpendingTracker-debug.apk
 
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+      - name: Publish direct APK to GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: spending-tracker-debug-apk
-          path: apk-build/android/app/build/outputs/apk/debug/app-debug.apk
+          tag_name: latest-apk
+          name: Spending Tracker Latest APK
+          files: apk-build/SpendingTracker-debug.apk
+          make_latest: true
