@@ -70,9 +70,13 @@ jobs:
           ls -lh ../../SpendingTracker-debug.apk
 
       - name: Publish direct APK to GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: latest-apk
-          name: Spending Tracker Latest APK
-          files: apk-build/SpendingTracker-debug.apk
-          make_latest: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          if gh release view latest-apk >/dev/null 2>&1; then
+            gh release upload latest-apk apk-build/SpendingTracker-debug.apk --clobber
+            gh release edit latest-apk --title "Spending Tracker Latest APK" --latest
+          else
+            gh release create latest-apk apk-build/SpendingTracker-debug.apk --title "Spending Tracker Latest APK" --notes "Latest debug APK build for Spending Tracker" --latest
+          fi
