@@ -153,3 +153,20 @@ body.rp-open{overflow:hidden}
 .rp-actions{display:flex;gap:8px}
 .rp-bar button.rp-print{background:#edf4ff;color:#1769e0;padding:10px 12px}
 .pdf-link{display:block;text-align:center;text-decoration:none;border-radius:12px;padding:14px;font-weight:700;background:#edf4ff;color:var(--blue)}
+.card-pay{margin-top:12px;border:1px solid #ffffff66;background:#ffffff26;color:#fff;border-radius:10px;padding:8px 14px;font-weight:700;font-size:12px}
+.card-right{display:flex;align-items:center;gap:10px}
+.pay-btn{border:0;background:var(--blue);color:#fff;border-radius:9px;padding:7px 14px;font-weight:700;font-size:12px}
+.pf-owed{background:#fff7e6;border:1px solid #ffe2a8;color:#8a5a00;border-radius:10px;padding:10px 12px;font-size:12px;font-weight:600;margin-bottom:12px;text-align:left}
+body.dark .pf-owed{background:#3a2e12;border-color:#5b4716;color:#ffd98a}
+.more-pay{display:block;margin:8px auto 10px}
+.section-heading .text-button{font-size:13px}
+.hdr-links{display:flex;gap:14px;flex-wrap:wrap;justify-content:flex-end}
+.pl-preview{background:#eef6ff;border:1px solid #cfe2ff;color:#0f4fa8;border-radius:10px;padding:10px 12px;font-size:12px;font-weight:600;margin-bottom:12px;text-align:left;line-height:1.5}
+body.dark .pl-preview{background:#16304f;border-color:#2b4d7b;color:#bcd8ff}
+.n-input{width:70px;border:1px solid #dce3ed;border-radius:999px;padding:8px 10px;background:var(--panel);color:inherit;text-align:center}
+.plan-row{cursor:pointer}
+.plan-main{flex:1;min-width:0}
+.plan-main .bar{margin-top:8px}
+.plan-amt{text-align:right}.plan-amt small{display:block;color:var(--muted);font-size:11px;margin-top:2px}
+.done-plans{padding:10px 0 6px}.done-plans summary{cursor:pointer;color:var(--muted);font-size:13px;font-weight:700;padding:6px 0}
+#installments-box .loan-sum{margin-top:0}

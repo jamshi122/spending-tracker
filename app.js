@@ -325,7 +325,7 @@ function renderAll() {
   $('user-label').textContent = `${state.user?.name || ''}${isAdmin() ? ' · Admin' : ''}`;
   $('admin-only').classList.toggle('hidden', !isAdmin());
   document.querySelectorAll('.admin-action').forEach(el => el.classList.toggle('hidden', !isAdmin()));
-  renderDashboard(); renderHistory(); renderAccounts(); renderLoans(); renderSelects(); renderBudgets(); renderAdmin(); uxSettingsUI(); uxForm();
+  renderDashboard(); renderHistory(); renderAccounts(); renderLoans(); renderPayments(); renderInstallments(); renderUpcoming(); uxHeroInst(); renderSelects(); renderBudgets(); renderAdmin(); uxSettingsUI(); uxForm();
   if (!UXS.restored && state.accounts.length) { uxRestoreLast(); UXS.restored = true; }
 }
 
@@ -341,7 +341,7 @@ function renderDashboard() {
   const LS = uxLoans(), loanOwe = LS.owe.reduce((s, p) => s + Math.max(0, p.total), 0), loanLent = LS.lent.reduce((s, p) => s + Math.max(0, p.total), 0);
   const income = recent.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
   const expense = recent.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
-  $('net-worth').textContent = money(cash - debt - loanOwe + loanLent);
+  $('net-worth').textContent = money(cash - debt - loanOwe + loanLent - uxInstRemaining());
   let ls = $('loan-stat'); if (!ls) { ls = document.createElement('span'); ls.id = 'loan-stat'; document.querySelector('.hero-stats').appendChild(ls); }
   ls.innerHTML = `Loans (net) <b>${loanLent - loanOwe < 0 ? '−' : ''}${money(Math.abs(loanLent - loanOwe))}</b>`; $('cash-total').textContent = money(cash); $('debt-total').textContent = money(debt);
   $('income-total').textContent = money(income); $('expense-total').textContent = money(expense); $('saved-total').textContent = money(income - expense);
@@ -349,14 +349,14 @@ function renderDashboard() {
     const owed = Math.max(0, num(c.balance)), lim = num(c.limit), avail = Math.max(0, lim - owed);
     const pct = lim > 0 ? Math.min(100, owed / lim * 100) : 0;
     const ow = userName(c.owner), owner = ow === '—' ? (c.owner || '') : ow;
-    return `<article class="credit-card" style="--card-color:${esc(c.color || '#334155')}"><div class="card-top"><span>💳 ${esc(c.name)}</span><span>•••• ${esc(c.last4 || '')}</span></div><div class="card-balance ${owed > 0 ? 'liability' : ''}">${owed > 0 ? '−' : ''}${money(owed)}</div><small>You owe · ${esc(owner)}</small><div class="bar"><i style="width:${pct}%"></i></div><div class="card-limit">Available ${money(avail)} of ${money(lim)}${uxDue(c)}</div></article>`;
+    return `<article class="credit-card" style="--card-color:${esc(c.color || '#334155')}"><div class="card-top"><span>💳 ${esc(c.name)}</span><span>•••• ${esc(c.last4 || '')}</span></div><div class="card-balance ${owed > 0 ? 'liability' : ''}">${owed > 0 ? '−' : ''}${money(owed)}</div><small>You owe · ${esc(owner)}</small><div class="bar"><i style="width:${pct}%"></i></div><div class="card-limit">Available ${money(avail)} of ${money(lim)}${uxDue(c)}</div>${owed > 0 ? `<button class="card-pay" type="button" data-pay="${esc(c.id)}">💳 Pay card</button>` : ''}</article>`;
   }).join('') : '<p class="empty">No credit cards added yet.</p>';
   const groups = {}; recent.filter(t => t.type === 'expense').forEach(t => { const k = t.category || 'Other'; groups[k] = (groups[k] || 0) + t.amount; });
   const top = Object.entries(groups).sort((a, b) => b[1] - a[1]).slice(0, 6);
   const month = {};
   state.transactions.filter(t => t.type === 'expense' && !isLoanTx(t) && inPeriod(t, P)).forEach(t => { month[t.category] = (month[t.category] || 0) + t.amount; });
   const rows = top.map(([k, v]) => `<div class="summary-row"><span>${catIcon(k)} ${esc(k)}</span><b>${money(v)}</b></div>`).join('');
-  const buds = state.budgets.filter(b => b.category !== '__monthstart').map(b => {
+  const buds = state.budgets.filter(b => !String(b.category).startsWith('__')).map(b => {
     const sp = month[b.category] || 0, amt = num(b.amount), pct = amt > 0 ? Math.min(100, sp / amt * 100) : 0;
     return `<div class="bud"><div class="summary-row"><span>${catIcon(b.category)} ${esc(b.category)} budget</span><b>${money(sp)} / ${money(amt)}</b></div><div class="bar ${sp > amt ? 'over' : ''}"><i style="width:${pct}%"></i></div></div>`;
   }).join('');
@@ -852,7 +852,7 @@ function uxDashPeriodUI(P) {
   const h = $('category-summary').previousElementSibling?.querySelector('span'); if (h) h.textContent = 'This period';
 }
 function renderBudgets() {
-  $('budget-list').innerHTML = state.budgets.filter(b => b.category !== '__monthstart').map(b => `<div class="summary-row"><span>${catIcon(b.category)} ${esc(b.category)} · per period</span><b>${money(b.amount)}</b></div>`).join('') || '<p class="empty">No budgets set.</p>';
+  $('budget-list').innerHTML = state.budgets.filter(b => !String(b.category).startsWith('__')).map(b => `<div class="summary-row"><span>${catIcon(b.category)} ${esc(b.category)} · per period</span><b>${money(b.amount)}</b></div>`).join('') || '<p class="empty">No budgets set.</p>';
 }
 function uxStartDayForm() {
   uxSheet(`<h3>📅 Month starts on day</h3><p>Your month runs from this day to the day before the next one. Example: 25 gives 25 Oct – 24 Nov.</p><div class="lf"><label>Day of month (1–31)</label><input id="sd-day" type="number" inputmode="numeric" min="1" max="31" value="${uxStartDay()}"></div><div class="sheet-btns"><button data-save="1" class="save-btn">Save</button><button data-close>Cancel</button></div>`,
@@ -956,11 +956,11 @@ function uxReportHTML(from, to) {
   const lo = D.loan;
   if (lo.borrowed + lo.repaid + lo.lent + lo.back > 0) h += `<h2 class="rp-sec">🤝 Loan activity <small>(not counted in income or expenses)</small></h2><table class="rp-t"><tbody>${lo.borrowed ? `<tr><td>Money borrowed</td><td class="n">${money(lo.borrowed)}</td></tr>` : ''}${lo.repaid ? `<tr><td>Loan repayments made</td><td class="n">${money(lo.repaid)}</td></tr>` : ''}${lo.lent ? `<tr><td>Money lent to others</td><td class="n">${money(lo.lent)}</td></tr>` : ''}${lo.back ? `<tr><td>Money received back</td><td class="n">${money(lo.back)}</td></tr>` : ''}</tbody></table>`;
   const spent = {}; D.exp.forEach(c => { spent[lc(c.name)] = c.total; });
-  const buds = state.budgets.filter(b => b.category !== '__monthstart' && (spent[lc(b.category)] || 0) > 0);
+  const buds = state.budgets.filter(b => !String(b.category).startsWith('__') && (spent[lc(b.category)] || 0) > 0);
   if (isPeriod && buds.length) {
     h += `<h2 class="rp-sec">🎯 Budget vs actual</h2><table class="rp-t"><thead><tr><th>Category</th><th class="n">Budget</th><th class="n">Spent</th><th class="n">Left</th></tr></thead><tbody>${buds.map(b => { const sp = spent[lc(b.category)] || 0, left = num(b.amount) - sp; return `<tr><td>${catIcon(b.category)} ${esc(b.category)}</td><td class="n">${money(b.amount)}</td><td class="n">${money(sp)}</td><td class="n ${left < 0 ? 'neg-t' : 'pos-t'}">${rpSigned(left)}</td></tr>`; }).join('')}</tbody></table>`;
   }
-  h += `<h2 class="rp-sec">📌 Position today <small>(${rpFmt(today())})</small></h2><table class="rp-t"><tbody><tr><td>Cash &amp; bank</td><td class="n">${money(cash)}</td></tr><tr><td>Credit card debt</td><td class="n">${money(debt)}</td></tr><tr><td>Loans (net)</td><td class="n">${rpSigned(loanNet)}</td></tr><tr class="rp-total"><td>Net worth</td><td class="n">${rpSigned(cash - debt + loanNet)}</td></tr></tbody></table>`;
+  h += `<h2 class="rp-sec">📌 Position today <small>(${rpFmt(today())})</small></h2><table class="rp-t"><tbody><tr><td>Cash &amp; bank</td><td class="n">${money(cash)}</td></tr><tr><td>Credit card debt</td><td class="n">${money(debt)}</td></tr><tr><td>Loans (net)</td><td class="n">${rpSigned(loanNet)}</td></tr>${uxInstRemaining() > 0.005 ? `<tr><td>Installments remaining</td><td class="n">${money(uxInstRemaining())}</td></tr>` : ''}<tr class="rp-total"><td>Net worth</td><td class="n">${rpSigned(cash - debt + loanNet - uxInstRemaining())}</td></tr></tbody></table>`;
   if (RP.list) {
     const items = D.rows.slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
     h += `<h2 class="rp-sec">🧾 All transactions (${items.length})</h2><table class="rp-t"><thead><tr><th>Date</th><th>Category</th><th>Details</th><th class="n">Amount</th></tr></thead><tbody>${items.map(t => `<tr><td>${esc(String(t.date).slice(5, 10))}</td><td>${esc(t.category || '—')}${t.subcategory ? ' · ' + esc(t.subcategory) : ''}</td><td>${esc(t.product || t.note || '')}</td><td class="n ${t.type === 'income' ? 'pos-t' : 'neg-t'}">${t.type === 'income' ? '+' : '−'}${money(t.amount)}</td></tr>`).join('')}</tbody></table>`;
@@ -1066,13 +1066,13 @@ function uxReportPDFDoc() {
   const lo = D.loan;
   if (lo.borrowed + lo.repaid + lo.lent + lo.back > 0) { section('Loan activity (not counted in income or expenses)'); const r = []; if (lo.borrowed) r.push(['Money borrowed', money(lo.borrowed)]); if (lo.repaid) r.push(['Loan repayments made', money(lo.repaid)]); if (lo.lent) r.push(['Money lent to others', money(lo.lent)]); if (lo.back) r.push(['Money received back', money(lo.back)]); table(['Item', 'Amount'], r, { 1: { halign: 'right' } }); }
   const spent = {}; D.exp.forEach(c => { spent[lc(c.name)] = c.total; });
-  const buds = state.budgets.filter(b => b.category !== '__monthstart' && (spent[lc(b.category)] || 0) > 0);
+  const buds = state.budgets.filter(b => !String(b.category).startsWith('__') && (spent[lc(b.category)] || 0) > 0);
   if (isPeriod && buds.length) {
     section('Budget vs actual');
     table(['Category', 'Budget', 'Spent', 'Left'], buds.map(b => { const sp = spent[lc(b.category)] || 0, left = num(b.amount) - sp; return [P(b.category), P(money(b.amount)), P(money(sp)), { content: P(rpSigned(left)), styles: { textColor: left < 0 ? red : green, fontStyle: 'bold' } }]; }), right);
   }
   section('Position today (' + P(rpFmt(today())) + ')');
-  table(['Item', 'Amount'], [['Cash & bank', P(money(cash))], ['Credit card debt', P(money(debt))], ['Loans (net)', P(rpSigned(loanNet))], [{ content: 'Net worth', styles: { fontStyle: 'bold', fillColor: [243, 246, 251] } }, { content: P(rpSigned(cash - debt + loanNet)), styles: { fontStyle: 'bold', fillColor: [243, 246, 251] } }]], { 1: { halign: 'right' } });
+  table(['Item', 'Amount'], [['Cash & bank', P(money(cash))], ['Credit card debt', P(money(debt))], ['Loans (net)', P(rpSigned(loanNet))], ...(uxInstRemaining() > 0.005 ? [['Installments remaining', P(money(uxInstRemaining()))]] : []), [{ content: 'Net worth', styles: { fontStyle: 'bold', fillColor: [243, 246, 251] } }, { content: P(rpSigned(cash - debt + loanNet - uxInstRemaining())), styles: { fontStyle: 'bold', fillColor: [243, 246, 251] } }]], { 1: { halign: 'right' } });
   if (RP.list) {
     const items = D.rows.slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
     section('All transactions (' + items.length + ')');
@@ -1095,3 +1095,199 @@ async function uxReportSavePDF() {
   uxSheet(`<div class="sheet-ic">📄</div><h3>PDF ready</h3><p>${esc(name)}</p><div class="sheet-btns">${navigator.canShare ? '<button data-pdf="share">📤 Share / Save to Files</button>' : ''}<a class="pdf-link" href="${url}" download="${esc(name)}" target="_blank" rel="noopener">⬇️ Download / Open</a><button data-close>Close</button></div>`,
     async e => { if (e.target.closest('[data-pdf="share"]')) { try { await share(); } catch (err) { if (!err || err.name !== 'AbortError') toast('Sharing failed. Use Download / Open.', 'error'); } } });
 }
+
+
+/* ===== Credit card payment: sheet flow, Pay buttons, payment history ===== */
+const uxOwner = o => { const n = userName(o); return n === '—' ? (o || '') : n; };
+function renderAccounts() {
+  $('accounts-list').innerHTML = state.accounts.map(a => `<div class="account-row"><div><b>${esc(a.name)}</b><small>${esc(a.type || 'Account')} · ${esc(uxOwner(a.owner))}</small></div><strong>${money(a.balance)}</strong></div>`).join('') || '<p class="empty">No accounts.</p>';
+  $('cards-list').innerHTML = state.cards.map(c => {
+    const owed = Math.max(0, num(c.balance)), avail = Math.max(0, num(c.limit) - owed);
+    return `<div class="account-row"><div><b>💳 ${esc(c.name)} ·•••• ${esc(c.last4 || '')}</b><small>Limit ${money(c.limit)} · Available ${money(avail)}${uxDue(c)}</small></div><div class="card-right"><strong class="${owed > 0 ? 'neg' : ''}">${owed > 0 ? '−' : ''}${money(owed)}</strong>${owed > 0 ? `<button type="button" class="pay-btn" data-pay="${esc(c.id)}">Pay</button>` : ''}</div></div>`;
+  }).join('') || '<p class="empty">No credit cards.</p>';
+}
+const PH = { all: false };
+function renderPayments() {
+  let box = $('payments-box');
+  if (!box) {
+    box = document.createElement('div'); box.id = 'payments-box';
+    const lb = $('loans-box'); if (lb) $('view-accounts').insertBefore(box, lb); else $('view-accounts').appendChild(box);
+    box.addEventListener('click', e => { if (e.target.closest('[data-payall]')) { PH.all = !PH.all; renderPayments(); } });
+  }
+  const list = state.payments.slice().sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  if (!list.length) { box.innerHTML = ''; return; }
+  const shown = PH.all ? list : list.slice(0, 5);
+  box.innerHTML = `<div class="section-heading"><h2>Card payments</h2><span>${list.length} recorded</span></div><section class="panel">${shown.map(p => { const c = state.cards.find(x => x.id === String(p.cardId)), a = state.accounts.find(x => x.id === String(p.accountId)); return `<div class="account-row"><div><b>💳 ${esc(c ? c.name : 'Card')}</b><small>${esc(String(p.date).slice(0, 10))}${a ? ' · from ' + esc(a.name) : ''}${p.note ? ' · ' + esc(p.note) : ''}</small></div><strong class="pos">${money(p.amount)}</strong></div>`; }).join('')}${list.length > 5 ? `<button type="button" class="text-button more-pay" data-payall="1">${PH.all ? 'Show less' : 'Show all ' + list.length}</button>` : ''}</section>`;
+}
+function uxPayForm(cardId) {
+  if (!state.cards.length) return toast('No credit card added yet.', 'error');
+  if (!state.accounts.length) return toast('Add a cash/bank account first.', 'error');
+  const owedOf = c => Math.max(0, num(c.balance)), byId = id => state.cards.find(c => c.id === String(id));
+  const pick = byId(cardId) || state.cards.find(c => owedOf(c) > 0) || state.cards[0];
+  uxSheet(`<div class="sheet-ic">💳</div><h3>Pay credit card</h3><div class="lf"><label>Card</label><select id="pf-card">${state.cards.map(c => `<option value="${esc(c.id)}">${esc(c.name)} ·•••• ${esc(c.last4 || '')}</option>`).join('')}</select></div><div class="pf-owed" id="pf-owed"></div><div class="lf"><label>Amount (QR)</label><input id="pf-amt" type="number" inputmode="decimal" step="0.01" min="0.01" placeholder="0.00"><div class="chips"><button type="button" class="chip" data-fill="full">Pay full amount</button><button type="button" class="chip" data-fill="half">Half</button></div></div><div class="lf"><label>Pay from</label><select id="pf-acc">${state.accounts.map(a => `<option value="${esc(a.id)}">${esc(a.name)} (${money(a.balance)})</option>`).join('')}</select></div><div class="lf"><label>Date</label><input id="pf-date" type="date" value="${today()}"></div><div class="lf"><label>Note (optional)</label><input id="pf-note"></div><div class="sheet-btns"><button data-save="1" class="save-btn">Record payment</button><button data-close>Cancel</button></div>`,
+    async (e, close) => {
+      const c = byId($('pf-card').value), a = state.accounts.find(x => x.id === $('pf-acc').value);
+      const fill = e.target.closest('[data-fill]')?.dataset.fill;
+      if (fill) { const o = owedOf(c); $('pf-amt').value = (fill === 'full' ? o : o / 2).toFixed(2); return; }
+      if (!e.target.closest('[data-save]')) return;
+      const amt = num($('pf-amt').value);
+      if (!c || !a) return toast('Choose a card and an account.', 'error');
+      if (amt <= 0) return toast('Enter an amount greater than zero.', 'error');
+      if (amt > owedOf(c) + 0.005 && !confirm(`You owe ${money(owedOf(c))} on this card. Pay ${money(amt)} anyway?`)) return;
+      if (amt > num(a.balance) + 0.005 && !confirm(`${a.name} has only ${money(a.balance)}. Continue?`)) return;
+      const data = { id: uid(), date: $('pf-date').value || today(), cardId: c.id, accountId: a.id, amount: amt, note: $('pf-note').value.trim() };
+      close();
+      c.balance = num(c.balance) - amt; a.balance = num(a.balance) - amt; state.payments.unshift({ ...data, userId: state.user?.id });
+      renderAll(); if ($('view-add').classList.contains('active')) switchView('accounts');
+      toast(`Paid ${money(amt)} · ${c.name} now owes ${money(Math.max(0, c.balance))} ✓`, 'success');
+      try { await api('addPayment', { data }); } catch (err) { toast('Payment not saved: ' + err.message, 'error'); }
+      uxSync();
+    });
+  const refresh = () => { const c = byId($('pf-card').value); $('pf-owed').textContent = c ? (owedOf(c) > 0 ? `You owe ${money(owedOf(c))} on this card${uxDue(c)}` : 'Nothing owed on this card') : ''; };
+  $('pf-card').value = pick.id; $('pf-card').onchange = refresh; refresh();
+}
+document.addEventListener('click', e => { const b = e.target.closest('[data-pay]'); if (b) uxPayForm(b.dataset.pay); });
+
+
+/* ===== Pay later / installment plans (stored in your sheet, no backend change) ===== */
+const r2 = v => Math.round((num(v) + Number.EPSILON) * 100) / 100;
+function uxAddMonths(ds, n) {
+  let y = +ds.slice(0, 4), m = +ds.slice(5, 7) - 1 + n; const d = +ds.slice(8, 10);
+  y += Math.floor(m / 12); m = ((m % 12) + 12) % 12;
+  return uxIso(y, m, Math.min(d, uxDim(y, m)));
+}
+function uxPlans() {
+  const out = [];
+  state.budgets.filter(b => String(b.category).startsWith('__plan|')).forEach(b => {
+    let p; try { p = JSON.parse(b.period); } catch (e) { return; }
+    if (!p || !p.id) return;
+    const txs = state.transactions.filter(t => String(t.fuelId || '') === 'plan:' + p.id).sort((a, c) => String(a.date).localeCompare(String(c.date)));
+    const paid = r2(txs.reduce((s, t) => s + t.amount, 0)), remaining = Math.max(0, r2(p.total - paid)), done = remaining < 0.005;
+    const rest = r2(p.total - p.down), base = Math.floor(rest / p.n * 100) / 100, items = [];
+    if (p.down > 0) items.push({ k: 0, date: p.date, amount: p.down });
+    for (let i = 1; i <= p.n; i++) items.push({ k: i, date: uxAddMonths(p.start, i - 1), amount: i === p.n ? r2(rest - base * (p.n - 1)) : base });
+    items.forEach((it, idx) => { it.paid = done || idx < txs.length; });
+    let next = items.find(it => !it.paid);
+    if (!done && !next) next = { k: p.n, date: items[items.length - 1].date, amount: remaining, extra: true };
+    out.push({ ...p, rowId: b.id, txs, paid, remaining, done, items, next, count: items.length, paidCount: items.filter(i => i.paid).length });
+  });
+  return out;
+}
+function uxInstRemaining() { return uxPlans().reduce((s, p) => s + p.remaining, 0); }
+function uxPlanTx(plan, k, amount, date, src) {
+  const [kind, id] = String(src || '').split(':');
+  return { id: uid(), date, type: 'expense', amount, category: plan.category, subcategory: plan.subcategory || '', product: plan.name + ' - ' + (k === 0 ? 'first payment' : 'installment ' + k + ' of ' + plan.n), note: 'Pay later', accountId: kind === 'acc' ? id : '', cardId: kind === 'card' ? id : '', isPrivate: false, fuelId: 'plan:' + plan.id };
+}
+function uxHeroInst() {
+  const hs = document.querySelector('.hero-stats'); if (!hs) return;
+  let el = $('inst-stat'); if (!el) { el = document.createElement('span'); el.id = 'inst-stat'; hs.appendChild(el); }
+  const r = uxInstRemaining(); el.style.display = r > 0.005 ? '' : 'none'; el.innerHTML = `Pay-later due <b>${money(r)}</b>`;
+}
+function renderInstallments() {
+  let box = $('installments-box');
+  if (!box) {
+    box = document.createElement('div'); box.id = 'installments-box';
+    const anchor = $('payments-box') || $('loans-box'); if (anchor) $('view-accounts').insertBefore(box, anchor); else $('view-accounts').appendChild(box);
+    box.addEventListener('click', e => {
+      const p = e.target.closest('[data-plan]'); if (p && !e.target.closest('[data-instpay]')) return uxPlanDetail(p.dataset.plan);
+      const pay = e.target.closest('[data-instpay]'); if (pay) uxInstPay(pay.dataset.instpay);
+    });
+  }
+  const plans = uxPlans(), act = plans.filter(p => !p.done).sort((a, b) => String(a.next.date).localeCompare(String(b.next.date))), fin = plans.filter(p => p.done);
+  const rem = act.reduce((s, p) => s + p.remaining, 0), nx = act[0];
+  const row = p => { const od = p.next && p.next.date < today(), pct = p.total > 0 ? Math.min(100, p.paid / p.total * 100) : 0; return `<div class="account-row plan-row" data-plan="${esc(p.id)}"><div class="plan-main"><b>${catIcon(p.category)} ${esc(p.name)}</b><small>${p.paidCount} of ${p.count} paid · ${p.next ? (od ? 'Overdue since ' : 'Next ') + esc(rpFmt(p.next.date)) : ''}</small><div class="bar"><i style="width:${pct.toFixed(0)}%"></i></div></div><div class="card-right"><div class="plan-amt"><strong class="${od ? 'neg' : ''}">${money(p.next ? Math.min(p.next.amount, p.remaining) : 0)}</strong><small>${money(p.remaining)} left</small></div><button type="button" class="pay-btn" data-instpay="${esc(p.id)}">Pay</button></div></div>`; };
+  box.innerHTML = `<div class="section-heading"><h2>🛒 Pay later</h2><button type="button" class="text-button" data-newplan="1">＋ New plan</button></div>` +
+    (act.length ? `<div class="loan-sum"><div><small>Total remaining</small><b class="neg">${money(rem)}</b></div><div><small>Next payment</small><b>${esc(rpFmt(nx.next.date))}</b></div></div>` : '') +
+    `<section class="panel">${act.map(row).join('') || '<p class="empty">No pay-later plans. Tap “＋ New plan” when you buy something in installments.</p>'}${fin.length ? `<details class="done-plans"><summary>✅ Completed (${fin.length})</summary>${fin.map(p => `<div class="account-row plan-row" data-plan="${esc(p.id)}"><div><b>${catIcon(p.category)} ${esc(p.name)}</b><small>Paid ${money(p.paid)}</small></div><strong class="pos">✓</strong></div>`).join('')}</details>` : ''}</section>`;
+}
+function renderUpcoming() {
+  let box = $('upcoming-box');
+  if (!box) {
+    const h = $('category-summary').previousElementSibling; if (!h) return;
+    box = document.createElement('div'); box.id = 'upcoming-box'; h.parentNode.insertBefore(box, h);
+    box.addEventListener('click', e => { const b = e.target.closest('[data-instpay]'); if (b) uxInstPay(b.dataset.instpay); });
+  }
+  const act = uxPlans().filter(p => !p.done && p.next).sort((a, b) => String(a.next.date).localeCompare(String(b.next.date))).slice(0, 4);
+  if (!act.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="section-heading"><h2>Upcoming installments</h2><button type="button" class="text-button" data-goto="accounts">See all</button></div><section class="panel">${act.map(p => { const od = p.next.date < today(); return `<div class="account-row"><div><b>🛒 ${esc(p.name)}</b><small class="${od ? 'neg' : ''}">${od ? 'Overdue · ' : 'Due '}${esc(rpFmt(p.next.date))} · ${p.paidCount} of ${p.count} paid</small></div><div class="card-right"><strong>${money(Math.min(p.next.amount, p.remaining))}</strong><button type="button" class="pay-btn" data-instpay="${esc(p.id)}">Pay</button></div></div>`; }).join('')}</section>`;
+}
+function uxPlanDetail(id) {
+  const p = uxPlans().find(x => x.id === id); if (!p) return;
+  const sched = p.items.map(it => { const od = !it.paid && it.date < today(); return `<div class="lh"><span>${it.k === 0 ? 'First payment' : 'Installment ' + it.k}<small>${esc(rpFmt(it.date))}${it.paid ? ' · paid' : od ? ' · overdue' : ''}</small></span><b class="${it.paid ? 'pos' : od ? 'neg' : ''}">${it.paid ? '✓ ' : ''}${money(it.amount)}</b></div>`; }).join('');
+  uxSheet(`<div class="sheet-ic">${catIcon(p.category)}</div><h3>${esc(p.name)}</h3><div class="sheet-amt ${p.done ? 'income' : 'expense'}">${p.done ? 'Fully paid ✓' : money(p.remaining) + ' left'}</div><p>Total ${money(p.total)}${p.fee > 0 ? ' (incl. fee ' + money(p.fee) + ')' : ''} · paid ${money(p.paid)}<br>${esc(p.category)}${p.subcategory ? ' · ' + esc(p.subcategory) : ''}</p><div class="sheet-btns">${p.done ? '' : `<button data-do="pay">💸 Pay ${money(Math.min(p.next.amount, p.remaining))}</button>`}<button class="del" data-do="del">🗑️ Delete plan</button><button data-close>Close</button></div><h4 class="mini-title">Schedule</h4>${sched}`,
+    async (e, close) => {
+      const d = e.target.closest('[data-do]')?.dataset.do; if (!d) return;
+      if (d === 'pay') { close(); return uxInstPay(id); }
+      if (d === 'del') {
+        if (!confirm('Delete this plan? Payments already recorded stay in your history.')) return;
+        close(); state.budgets = state.budgets.filter(b => b.id !== p.rowId); renderAll(); toast('Plan deleted ✓', 'success');
+        try { await api('deleteBudget', { id: p.rowId }); } catch (err) { toast('Not deleted: ' + err.message, 'error'); }
+        uxSync();
+      }
+    });
+}
+function uxInstPay(id) {
+  const p = uxPlans().find(x => x.id === id); if (!p || p.done) return;
+  const amt0 = Math.min(p.next.amount, p.remaining);
+  const srcOpts = state.accounts.map(a => `<option value="acc:${esc(a.id)}">${esc(a.name)} (${money(a.balance)})</option>`).join('') + state.cards.map(c => `<option value="card:${esc(c.id)}">💳 ${esc(c.name)}</option>`).join('');
+  uxSheet(`<div class="sheet-ic">🛒</div><h3>Pay ${esc(p.name)}</h3><div class="pf-owed">${p.next.extra ? 'Remaining balance' : 'Installment ' + p.next.k + ' of ' + p.n} · due ${esc(rpFmt(p.next.date))} · ${money(p.remaining)} left in total</div><div class="lf"><label>Amount (QR)</label><input id="ip-amt" type="number" inputmode="decimal" step="0.01" min="0.01" value="${amt0.toFixed(2)}"><div class="chips"><button type="button" class="chip" data-all="1">Pay everything left (${money(p.remaining)})</button></div></div><div class="lf"><label>Pay from</label><select id="ip-src">${srcOpts}</select></div><div class="lf"><label>Date</label><input id="ip-date" type="date" value="${today()}"></div><div class="sheet-btns"><button data-save="1" class="save-btn">Record payment</button><button data-close>Cancel</button></div>`,
+    async (e, close) => {
+      if (e.target.closest('[data-all]')) { $('ip-amt').value = p.remaining.toFixed(2); return; }
+      if (!e.target.closest('[data-save]')) return;
+      const amt = r2($('ip-amt').value), src = $('ip-src').value;
+      if (amt <= 0) return toast('Enter an amount greater than zero.', 'error');
+      if (amt > p.remaining + 0.005) return toast('That is more than the ' + money(p.remaining) + ' left.', 'error');
+      if (!src) return toast('Choose where to pay from.', 'error');
+      const tx = uxPlanTx(p, p.next.k, amt, $('ip-date').value || today(), src); close();
+      state.transactions.unshift(normalizeTx({ ...tx, userId: state.user?.id })); uxApply('expense', amt, tx.accountId, tx.cardId, 1);
+      const left = Math.max(0, r2(p.remaining - amt)); renderAll();
+      toast(left < 0.005 ? p.name + ' is fully paid 🎉' : 'Paid ' + money(amt) + ' · ' + money(left) + ' left ✓', 'success');
+      try { await api('addTx', { data: tx }); } catch (err) { toast('Not saved: ' + err.message, 'error'); }
+      uxSync();
+    });
+  const pref = state.cards.find(c => String(c.id) === String(p.src?.split(':')[1])) || state.accounts.find(a => String(a.id) === String(p.src?.split(':')[1]));
+  if (pref && [...$('ip-src').options].some(o => o.value === p.src)) $('ip-src').value = p.src;
+}
+function uxPlanForm() {
+  if (!state.accounts.length && !state.cards.length) return toast('Add an account or card first.', 'error');
+  const cats = uxCatList('expense').map(c => c.name), defCat = cats.find(c => lc(c) === 'shopping') || cats[0];
+  const srcOpts = state.accounts.map(a => `<option value="acc:${esc(a.id)}">${esc(a.name)} (${money(a.balance)})</option>`).join('') + state.cards.map(c => `<option value="card:${esc(c.id)}">💳 ${esc(c.name)}</option>`).join('');
+  uxSheet(`<h3>🛒 New pay-later plan</h3><div class="lf"><label>What did you buy?</label><input id="pl-name" placeholder="e.g. iPhone"></div><div class="lf"><label>Category</label><select id="pl-cat">${cats.map(c => `<option value="${esc(c)}">${catIcon(c)} ${esc(c)}</option>`).join('')}</select></div><div class="lf"><label>Subcategory</label><select id="pl-sub"></select></div><div class="lf"><label>Price (QR)</label><input id="pl-price" type="number" inputmode="decimal" step="0.01" min="0" placeholder="5000"></div><div class="lf"><label>Extra fee / interest (optional)</label><input id="pl-fee" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0"></div><div class="lf"><label>Installments after the first payment</label><div class="chips">${[4, 6, 8, 12].map(n => `<button type="button" class="chip ${n === 4 ? 'on' : ''}" data-n="${n}">${n}</button>`).join('')}<input id="pl-n" class="n-input" type="number" inputmode="numeric" min="1" max="60" value="4"></div></div><div class="lf"><label>Pay now (first payment)</label><input id="pl-down" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0"><div class="chips"><button type="button" class="chip" data-equal="1">Equal share</button></div></div><div class="lf"><label>Next installment due</label><input id="pl-start" type="date" value="${uxAddMonths(today(), 1)}"></div><div class="lf"><label>Pay from</label><select id="pl-src">${srcOpts}</select></div><div class="pl-preview" id="pl-prev">Enter the price to see the plan.</div><div class="sheet-btns"><button data-save="1" class="save-btn">Create plan</button><button data-close>Cancel</button></div>`,
+    async (e, close) => {
+      const chip = e.target.closest('[data-n]'); if (chip) { $('pl-n').value = chip.dataset.n; recalc(); return; }
+      if (e.target.closest('[data-equal]')) { manual = false; recalc(); return; }
+      if (!e.target.closest('[data-save]')) return;
+      const v = vals(), name = $('pl-name').value.trim();
+      if (!name) return toast('Enter what you bought.', 'error');
+      if (v.price <= 0) return toast('Enter the price.', 'error');
+      if (!(v.n >= 1 && v.n <= 60)) return toast('Installments must be between 1 and 60.', 'error');
+      if (v.down < 0 || v.down >= v.total) return toast('Pay-now must be less than the total of ' + money(v.total) + '.', 'error');
+      if (!$('pl-src').value) return toast('Choose where to pay from.', 'error');
+      const plan = { v: 1, id: uid(), name, category: $('pl-cat').value, subcategory: $('pl-sub').value, price: v.price, fee: v.fee, total: v.total, down: v.down, n: v.n, start: $('pl-start').value || uxAddMonths(today(), 1), date: today(), src: $('pl-src').value };
+      const row = { id: uid(), category: '__plan|' + plan.id, amount: plan.total, period: JSON.stringify(plan), userId: String(state.user?.id || '') };
+      close(); state.budgets.push(row);
+      const tx = plan.down > 0 ? uxPlanTx(plan, 0, plan.down, plan.date, plan.src) : null;
+      if (tx) { state.transactions.unshift(normalizeTx({ ...tx, userId: state.user?.id })); uxApply('expense', tx.amount, tx.accountId, tx.cardId, 1); }
+      renderAll(); toast('Plan created ✓ ' + money(plan.total - plan.down) + ' left to pay', 'success');
+      try { await api('saveBudget', { data: { id: row.id, category: row.category, amount: row.amount, period: row.period } }); if (tx) await api('addTx', { data: tx }); }
+      catch (err) { toast('Not saved: ' + err.message, 'error'); }
+      uxSync();
+    });
+  let manual = false;
+  const vals = () => { const price = r2($('pl-price').value), fee = r2($('pl-fee').value), n = Math.round(num($('pl-n').value)), total = r2(price + fee); return { price, fee, n, total, down: r2($('pl-down').value) }; };
+  const subs = () => { const c = $('pl-cat').value, l = subsFor(c); $('pl-sub').innerHTML = '<option value="">— none —</option>' + l.map(s => `<option value="${esc(s.name)}">${s.icon} ${esc(s.name)}</option>`).join(''); const g = l.find(s => /gadget|mobile|electronic/i.test(s.name)); if (g && /shop|tech/i.test(c)) $('pl-sub').value = g.name; };
+  const recalc = () => {
+    const v = vals(); document.querySelectorAll('[data-n]').forEach(b => b.classList.toggle('on', +b.dataset.n === v.n));
+    if (!manual && v.n >= 1) $('pl-down').value = v.total > 0 ? r2(v.total / (v.n + 1)).toFixed(2) : '';
+    const d = r2($('pl-down').value), rest = r2(v.total - d), per = v.n >= 1 ? rest / v.n : 0;
+    $('pl-prev').textContent = v.total > 0 && v.n >= 1 ? `Total ${money(v.total)} · pay now ${money(d)} · then ${v.n} × ${money(per)} monthly from ${rpFmt($('pl-start').value || today())}` : 'Enter the price to see the plan.';
+  };
+  $('pl-cat').value = defCat; $('pl-cat').onchange = subs; subs();
+  ['pl-price', 'pl-fee', 'pl-n', 'pl-start'].forEach(i => $(i).addEventListener('input', recalc));
+  $('pl-down').addEventListener('input', () => { manual = true; recalc(); });
+  recalc();
+}
+document.addEventListener('click', e => {
+  if (e.target.closest('[data-newplan]')) return uxPlanForm();
+  const g = e.target.closest('[data-goto]'); if (g) switchView(g.dataset.goto);
+});
