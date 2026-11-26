@@ -150,3 +150,6 @@ body.rp-open{overflow:hidden}
  .rp-t tr,.rp-kpi{break-inside:avoid}.rp-t thead{display:table-header-group}
  @page{margin:14mm}
 }
+.rp-actions{display:flex;gap:8px}
+.rp-bar button.rp-print{background:#edf4ff;color:#1769e0;padding:10px 12px}
+.pdf-link{display:block;text-align:center;text-decoration:none;border-radius:12px;padding:14px;font-weight:700;background:#edf4ff;color:var(--blue)}

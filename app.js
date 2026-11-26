@@ -977,12 +977,13 @@ function uxReportOpen(from, to) {
   let o = $('report-overlay');
   if (!o) {
     o = document.createElement('div'); o.id = 'report-overlay';
-    o.innerHTML = `<div class="rp-bar"><button type="button" data-rp="close">✕ Close</button><b>Report</b><button type="button" class="primary" data-rp="print">🖨️ Print / PDF</button></div><div class="rp-controls"><div class="rp-dates"><label>From<input type="date" id="rp-from"></label><label>To<input type="date" id="rp-to"></label></div><div class="rp-chips"><button type="button" data-rp-range="period">This period</button><button type="button" data-rp-range="lastperiod">Last period</button><button type="button" data-rp-range="month">This month</button><button type="button" data-rp-range="lastmonth">Last month</button><button type="button" data-rp-range="three">Last 3 periods</button><button type="button" data-rp-range="year">This year</button></div><label class="rp-opt"><input type="checkbox" id="rp-subs" checked> Show subcategories</label><label class="rp-opt"><input type="checkbox" id="rp-list"> Include full transaction list</label><p class="rp-hint">Save as PDF on iPhone: tap <b>Print / PDF</b>, pinch OUT on the preview with two fingers, then tap the Share button and choose <b>Save to Files</b>.</p></div><div id="rp-paper"></div>`;
+    o.innerHTML = `<div class="rp-bar"><button type="button" data-rp="close">✕ Close</button><b>Report</b><span class="rp-actions"><button type="button" class="primary" data-rp="pdf">📄 Save PDF</button><button type="button" class="rp-print" data-rp="print" aria-label="Print">🖨️</button></span></div><div class="rp-controls"><div class="rp-dates"><label>From<input type="date" id="rp-from"></label><label>To<input type="date" id="rp-to"></label></div><div class="rp-chips"><button type="button" data-rp-range="period">This period</button><button type="button" data-rp-range="lastperiod">Last period</button><button type="button" data-rp-range="month">This month</button><button type="button" data-rp-range="lastmonth">Last month</button><button type="button" data-rp-range="three">Last 3 periods</button><button type="button" data-rp-range="year">This year</button></div><label class="rp-opt"><input type="checkbox" id="rp-subs" checked> Show subcategories</label><label class="rp-opt"><input type="checkbox" id="rp-list"> Include full transaction list</label><p class="rp-hint">Tap <b>Save PDF</b>, then choose <b>Save to Files</b> (or send it by WhatsApp, Mail, AirDrop or Print). The PDF supports English text; other scripts are skipped in the PDF only.</p></div><div id="rp-paper"></div>`;
     document.body.appendChild(o);
     o.addEventListener('click', e => {
       const a = e.target.closest('[data-rp]')?.dataset.rp, r = e.target.closest('[data-rp-range]')?.dataset.rpRange;
       if (a === 'close') { o.className = ''; document.body.classList.remove('rp-open'); document.title = 'Jamshi Solution – Spending Tracker'; }
       if (a === 'print') window.print();
+      if (a === 'pdf') uxReportSavePDF();
       if (r) {
         const t = new Date(), y = t.getFullYear(), m = t.getMonth(), cur = uxPeriod(0);
         const mo = (yy, mm) => [uxIso(yy, mm, 1), uxIso(yy, mm, uxDim(yy, mm))];
@@ -1000,8 +1001,97 @@ function uxReportOpen(from, to) {
   }
   const P = uxPeriod(UXM.offset || 0); RP.from = from || P.start; RP.to = to || P.end;
   o.className = 'open'; document.body.classList.add('rp-open'); o.scrollTop = 0; uxReportRender();
+  const sa = (window.navigator.standalone === true) || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+  o.querySelector('.rp-print').style.display = sa ? 'none' : '';
+  uxLoadPdfLibs().catch(() => {});
 }
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-report]'); if (b) return uxReportOpen(b.dataset.from, b.dataset.to);
   if (e.target.closest('#btn-report')) uxReportOpen();
 });
+
+
+/* ===== Real PDF file (works inside the home-screen app, where window.print() does nothing) ===== */
+let uxPdfPromise = null;
+function uxLoadPdfLibs() {
+  if (window.jspdf && window.jspdf.jsPDF && window.jspdf.jsPDF.API && window.jspdf.jsPDF.API.autoTable) return Promise.resolve();
+  if (uxPdfPromise) return uxPdfPromise;
+  const load = urls => new Promise((res, rej) => {
+    let i = 0; const next = () => { if (i >= urls.length) return rej(new Error('load failed')); const sc = document.createElement('script'); sc.src = urls[i++]; sc.onload = res; sc.onerror = () => { sc.remove(); next(); }; document.head.appendChild(sc); }; next();
+  });
+  uxPdfPromise = load(['https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js', 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js'])
+    .then(() => load(['https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js', 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js']))
+    .catch(e => { uxPdfPromise = null; throw e; });
+  return uxPdfPromise;
+}
+const rpPlain = s => String(s == null ? '' : s).replace(/[\u{1F000}-\u{1FFFF}\u{2600}-\u{27BF}\u{2300}-\u{23FF}\u{2B00}-\u{2BFF}\uFE0F\u200D\u20E3]/gu, '').replace(/[–—−]/g, '-').replace(/[’‘]/g, "'").replace(/[“”]/g, '"').replace(/[^\x20-\x7E\u00A0-\u00FF]/g, '').replace(/\s+/g, ' ').trim();
+function uxReportPDFDoc() {
+  const { jsPDF } = window.jspdf, doc = new jsPDF({ unit: 'mm', format: 'a4' }), W = 210, M = 14, from = RP.from, to = RP.to, P = rpPlain;
+  const ink = [23, 32, 51], gray = [113, 128, 150], blue = [23, 105, 224], green = [21, 148, 90], red = [220, 76, 76];
+  const D = uxReportData(from, to), days = Math.round((new Date(to + 'T00:00:00') - new Date(from + 'T00:00:00')) / 864e5) + 1, net = D.income - D.expense;
+  const L = uxLoans(), loanNet = L.lent.reduce((s, p) => s + Math.max(0, p.total), 0) - L.owe.reduce((s, p) => s + Math.max(0, p.total), 0);
+  const cash = state.accounts.reduce((s, a) => s + num(a.balance), 0), debt = state.cards.reduce((s, c) => s + Math.max(0, num(c.balance)), 0);
+  const per = uxPeriodOfDate(from, uxStartDay()), isPeriod = per.start === from && per.end === to;
+  doc.setFillColor(...blue); doc.roundedRect(W - M - 14, 12, 14, 14, 3, 3, 'F'); doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text('JS', W - M - 7, 21, { align: 'center' });
+  doc.setTextColor(...ink); doc.setFontSize(20); doc.text('Spending Report', M, 19);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(...gray);
+  doc.text(P(rpFmt(from) + ' - ' + rpFmt(to)) + '   |   ' + days + ' day' + (days > 1 ? 's' : ''), M, 25); doc.text('Prepared for ' + P(state.user?.name || ''), M, 30);
+  doc.setDrawColor(...blue); doc.setLineWidth(0.8); doc.line(M, 33, W - M, 33);
+  const kp = [['Total income', money(D.income), green], ['Total expenses', money(D.expense), red], ['Net saved', rpSigned(net), net < 0 ? red : green], ['Savings rate', D.income > 0 ? (net / D.income * 100).toFixed(1) + '%' : '-', ink], ['Avg daily spending', money(D.expense / days), ink], ['Transactions', String(D.core.length), ink]];
+  const bw = (W - 2 * M - 8) / 3;
+  kp.forEach((x, i) => { const cx = M + (i % 3) * (bw + 4), cy = 38 + Math.floor(i / 3) * 20; doc.setDrawColor(222, 228, 238); doc.setLineWidth(0.3); doc.roundedRect(cx, cy, bw, 16, 2, 2); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...gray); doc.text(x[0], cx + 3, cy + 5.5); doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(...x[2]); doc.text(P(x[1]), cx + 3, cy + 12.5); });
+  doc.setFont('helvetica', 'normal');
+  let y = 82;
+  if (!D.rows.length) { doc.setFontSize(10); doc.setTextColor(...gray); doc.text('No transactions in this date range.', M, y); return doc; }
+  const section = t => { if (y > 250) { doc.addPage(); y = 18; } doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(...ink); doc.text(t, M, y); doc.setDrawColor(222, 228, 238); doc.setLineWidth(0.3); doc.line(M, y + 2, W - M, y + 2); y += 5; doc.setFont('helvetica', 'normal'); };
+  const table = (head, body, cols, parse) => { doc.autoTable({ startY: y, head: [head], body, margin: { left: M, right: M, bottom: 16 }, theme: 'plain', styles: { fontSize: 9, cellPadding: 1.8, textColor: ink, lineColor: [236, 240, 246], lineWidth: { bottom: 0.2 } }, headStyles: { textColor: gray, fontSize: 8, fontStyle: 'bold', lineColor: [210, 218, 230], lineWidth: { bottom: 0.3 } }, columnStyles: cols || {}, didParseCell: d => { const c = (cols || {})[d.column.index]; if (c && c.halign && d.section === 'head') d.cell.styles.halign = c.halign; if (parse) parse(d); } }); y = doc.lastAutoTable.finalY + 9; };
+  const right = { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' } };
+  const catRows = (list, total) => {
+    const body = [];
+    list.forEach(c => {
+      body.push([{ content: P(c.name), styles: { fontStyle: 'bold' } }, { content: String(c.count), styles: { fontStyle: 'bold' } }, { content: P(money(c.total)), styles: { fontStyle: 'bold' } }, { content: (total > 0 ? c.total / total * 100 : 0).toFixed(1) + '%', styles: { fontStyle: 'bold' } }]);
+      if (RP.subs) {
+        const subs = Object.values(c.subs).sort((a, b) => b.total - a.total), rest = c.total - subs.reduce((s, x) => s + x.total, 0), restN = c.count - subs.reduce((s, x) => s + x.count, 0);
+        const r = subs.map(x => [x.name, x.count, x.total]); if (subs.length && rest > 0.005) r.push(['No subcategory', restN, rest]);
+        r.forEach(x => { const st = { textColor: gray, fontSize: 8 }; body.push([{ content: P(x[0]), styles: { ...st, cellPadding: { top: 1.2, bottom: 1.2, left: 8, right: 1.8 } } }, { content: String(x[1]), styles: st }, { content: P(money(x[2])), styles: st }, { content: (c.total > 0 ? x[2] / c.total * 100 : 0).toFixed(0) + '%', styles: st }]); });
+      }
+    });
+    const ts = { fontStyle: 'bold', fillColor: [243, 246, 251] };
+    body.push([{ content: 'Total', styles: ts }, { content: String(list.reduce((s, c) => s + c.count, 0)), styles: ts }, { content: P(money(total)), styles: ts }, { content: '100%', styles: ts }]);
+    return body;
+  };
+  if (D.inc.length) { section('Income summary'); table(['Category', 'Txns', 'Amount', 'Share'], catRows(D.inc, D.income), right); }
+  if (D.exp.length) { section('Expense summary'); table(['Category', 'Txns', 'Amount', 'Share'], catRows(D.exp, D.expense), right); }
+  if (D.core.some(t => !String(t.category || '').trim())) { doc.setFontSize(8); doc.setTextColor(...gray); doc.text('"Uncategorised" holds transactions saved without a category, so totals still match.', M, y - 4); y += 5; }
+  const lo = D.loan;
+  if (lo.borrowed + lo.repaid + lo.lent + lo.back > 0) { section('Loan activity (not counted in income or expenses)'); const r = []; if (lo.borrowed) r.push(['Money borrowed', money(lo.borrowed)]); if (lo.repaid) r.push(['Loan repayments made', money(lo.repaid)]); if (lo.lent) r.push(['Money lent to others', money(lo.lent)]); if (lo.back) r.push(['Money received back', money(lo.back)]); table(['Item', 'Amount'], r, { 1: { halign: 'right' } }); }
+  const spent = {}; D.exp.forEach(c => { spent[lc(c.name)] = c.total; });
+  const buds = state.budgets.filter(b => b.category !== '__monthstart' && (spent[lc(b.category)] || 0) > 0);
+  if (isPeriod && buds.length) {
+    section('Budget vs actual');
+    table(['Category', 'Budget', 'Spent', 'Left'], buds.map(b => { const sp = spent[lc(b.category)] || 0, left = num(b.amount) - sp; return [P(b.category), P(money(b.amount)), P(money(sp)), { content: P(rpSigned(left)), styles: { textColor: left < 0 ? red : green, fontStyle: 'bold' } }]; }), right);
+  }
+  section('Position today (' + P(rpFmt(today())) + ')');
+  table(['Item', 'Amount'], [['Cash & bank', P(money(cash))], ['Credit card debt', P(money(debt))], ['Loans (net)', P(rpSigned(loanNet))], [{ content: 'Net worth', styles: { fontStyle: 'bold', fillColor: [243, 246, 251] } }, { content: P(rpSigned(cash - debt + loanNet)), styles: { fontStyle: 'bold', fillColor: [243, 246, 251] } }]], { 1: { halign: 'right' } });
+  if (RP.list) {
+    const items = D.rows.slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    section('All transactions (' + items.length + ')');
+    table(['Date', 'Category', 'Details', 'Amount'], items.map(t => [String(t.date).slice(5, 10), P((t.category || '-') + (t.subcategory ? ' - ' + t.subcategory : '')), P(t.product || t.note || ''), { content: (t.type === 'income' ? '+' : '-') + P(money(t.amount)), styles: { textColor: t.type === 'income' ? green : red } }]), { 3: { halign: 'right' } });
+  }
+  const n = doc.getNumberOfPages();
+  for (let i = 1; i <= n; i++) { doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...gray); doc.text('Jamshi Solution - Spending Tracker', M, 289); doc.text('Generated ' + P(rpFmt(today())), W / 2, 289, { align: 'center' }); doc.text('Page ' + i + ' of ' + n, W - M, 289, { align: 'right' }); }
+  return doc;
+}
+async function uxReportSavePDF() {
+  try { await uxLoadPdfLibs(); } catch (e) { return toast('Could not load the PDF tool. Check your internet and try again.', 'error'); }
+  let blob, file; const name = 'Spending Report ' + RP.from + ' to ' + RP.to + '.pdf';
+  try { blob = uxReportPDFDoc().output('blob'); file = new File([blob], name, { type: 'application/pdf' }); }
+  catch (e) { return toast('Could not create the PDF: ' + e.message, 'error'); }
+  const share = () => navigator.share({ files: [file], title: name });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await share(); return; } catch (e) { if (e && e.name === 'AbortError') return; }
+  }
+  const url = URL.createObjectURL(blob);
+  uxSheet(`<div class="sheet-ic">📄</div><h3>PDF ready</h3><p>${esc(name)}</p><div class="sheet-btns">${navigator.canShare ? '<button data-pdf="share">📤 Share / Save to Files</button>' : ''}<a class="pdf-link" href="${url}" download="${esc(name)}" target="_blank" rel="noopener">⬇️ Download / Open</a><button data-close>Close</button></div>`,
+    async e => { if (e.target.closest('[data-pdf="share"]')) { try { await share(); } catch (err) { if (!err || err.name !== 'AbortError') toast('Sharing failed. Use Download / Open.', 'error'); } } });
+}
