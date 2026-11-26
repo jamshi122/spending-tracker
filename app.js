@@ -926,7 +926,12 @@ function uxReportData(from, to) {
   const inc = agg('income'), exp = agg('expense'), sum = l => l.reduce((s, c) => s + c.total, 0);
   const loan = { borrowed: 0, repaid: 0, lent: 0, back: 0 };
   rows.filter(isLoanTx).forEach(t => { if (t.category === 'Loan Borrowed') loan.borrowed += t.amount; else if (t.category === 'Loan Repayment') loan.repaid += t.amount; else if (t.category === 'Loan Given') loan.lent += t.amount; else loan.back += t.amount; });
-  return { rows, core, inc, exp, income: sum(inc), expense: sum(exp), loan };
+  const pays = uxPayItems().filter(p => p.date >= from && p.date <= to), payTotal = pays.reduce((s, p) => s + p.amount, 0);
+  const cardMap = {}; state.cards.forEach(c => { cardMap[c.id] = { card: c, spent: 0, paid: 0 }; });
+  rows.filter(t => t.type === 'expense' && t.cardId && cardMap[t.cardId]).forEach(t => { cardMap[t.cardId].spent += t.amount; });
+  pays.forEach(p => { if (cardMap[p.cardId]) cardMap[p.cardId].paid += p.amount; });
+  const cards = Object.values(cardMap).filter(x => x.spent > 0 || x.paid > 0), cardSpent = cards.reduce((s, x) => s + x.spent, 0);
+  return { rows, core, inc, exp, income: sum(inc), expense: sum(exp), loan, pays, payTotal, cards, cardSpent };
 }
 function rpCatTable(list, total, type) {
   const body = list.map(c => {
@@ -948,12 +953,13 @@ function uxReportHTML(from, to) {
   const cash = state.accounts.reduce((s, a) => s + num(a.balance), 0), debt = state.cards.reduce((s, c) => s + Math.max(0, num(c.balance)), 0);
   const SD = uxStartDay(), per = uxPeriodOfDate(from, SD), isPeriod = per.start === from && per.end === to;
   let h = `<div class="rp-head"><div><h1>Spending Report</h1><small>${rpFmt(from)} – ${rpFmt(to)} · ${days} day${days > 1 ? 's' : ''}</small><small>Prepared for ${esc(state.user?.name || '')}</small></div><div class="rp-logo">JS</div></div>`;
-  h += `<div class="rp-kpis"><div class="rp-kpi in"><small>Total income</small><b>${money(D.income)}</b></div><div class="rp-kpi out"><small>Total expenses</small><b>${money(D.expense)}</b></div><div class="rp-kpi"><small>Net saved</small><b class="${net < 0 ? 'neg-t' : 'pos-t'}">${rpSigned(net)}</b></div><div class="rp-kpi"><small>Savings rate</small><b>${rate}</b></div><div class="rp-kpi"><small>Avg daily spending</small><b>${money(D.expense / days)}</b></div><div class="rp-kpi"><small>Transactions</small><b>${D.core.length}</b></div></div>`;
-  if (!D.rows.length) return h + '<p class="rp-note">No transactions in this date range.</p>';
+  h += `<div class="rp-kpis"><div class="rp-kpi in"><small>Total income</small><b>${money(D.income)}</b></div><div class="rp-kpi out"><small>Total expenses</small><b>${money(D.expense)}</b></div><div class="rp-kpi"><small>Net saved</small><b class="${net < 0 ? 'neg-t' : 'pos-t'}">${rpSigned(net)}</b></div><div class="rp-kpi"><small>Savings rate</small><b>${rate}</b></div><div class="rp-kpi"><small>Avg daily spending</small><b>${money(D.expense / days)}</b></div><div class="rp-kpi"><small>Transactions</small><b>${D.core.length}</b></div><div class="rp-kpi"><small>Card payments</small><b style="color:#1769e0">${money(D.payTotal)}</b></div><div class="rp-kpi"><small>Spent on cards</small><b>${money(D.cardSpent)}</b></div></div>`;
+  if (!D.rows.length && !D.pays.length) return h + '<p class="rp-note">No transactions in this date range.</p>';
   if (D.inc.length) h += `<h2 class="rp-sec">💰 Income summary</h2>${rpCatTable(D.inc, D.income, 'income')}`;
   if (D.exp.length) h += `<h2 class="rp-sec">💸 Expense summary</h2>${rpCatTable(D.exp, D.expense, 'expense')}`;
   if (D.core.some(t => !String(t.category || '').trim())) h += '<p class="rp-note">“Uncategorised” holds transactions saved without a category, so totals still match.</p>';
   const lo = D.loan;
+  h += uxCardSectionHTML(D);
   if (lo.borrowed + lo.repaid + lo.lent + lo.back > 0) h += `<h2 class="rp-sec">🤝 Loan activity <small>(not counted in income or expenses)</small></h2><table class="rp-t"><tbody>${lo.borrowed ? `<tr><td>Money borrowed</td><td class="n">${money(lo.borrowed)}</td></tr>` : ''}${lo.repaid ? `<tr><td>Loan repayments made</td><td class="n">${money(lo.repaid)}</td></tr>` : ''}${lo.lent ? `<tr><td>Money lent to others</td><td class="n">${money(lo.lent)}</td></tr>` : ''}${lo.back ? `<tr><td>Money received back</td><td class="n">${money(lo.back)}</td></tr>` : ''}</tbody></table>`;
   const spent = {}; D.exp.forEach(c => { spent[lc(c.name)] = c.total; });
   const buds = state.budgets.filter(b => !String(b.category).startsWith('__') && (spent[lc(b.category)] || 0) > 0);
@@ -1037,12 +1043,12 @@ function uxReportPDFDoc() {
   doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(...gray);
   doc.text(P(rpFmt(from) + ' - ' + rpFmt(to)) + '   |   ' + days + ' day' + (days > 1 ? 's' : ''), M, 25); doc.text('Prepared for ' + P(state.user?.name || ''), M, 30);
   doc.setDrawColor(...blue); doc.setLineWidth(0.8); doc.line(M, 33, W - M, 33);
-  const kp = [['Total income', money(D.income), green], ['Total expenses', money(D.expense), red], ['Net saved', rpSigned(net), net < 0 ? red : green], ['Savings rate', D.income > 0 ? (net / D.income * 100).toFixed(1) + '%' : '-', ink], ['Avg daily spending', money(D.expense / days), ink], ['Transactions', String(D.core.length), ink]];
+  const kp = [['Total income', money(D.income), green], ['Total expenses', money(D.expense), red], ['Net saved', rpSigned(net), net < 0 ? red : green], ['Savings rate', D.income > 0 ? (net / D.income * 100).toFixed(1) + '%' : '-', ink], ['Avg daily spending', money(D.expense / days), ink], ['Transactions', String(D.core.length), ink], ['Card payments', money(D.payTotal), blue], ['Spent on cards', money(D.cardSpent), ink]];
   const bw = (W - 2 * M - 8) / 3;
   kp.forEach((x, i) => { const cx = M + (i % 3) * (bw + 4), cy = 38 + Math.floor(i / 3) * 20; doc.setDrawColor(222, 228, 238); doc.setLineWidth(0.3); doc.roundedRect(cx, cy, bw, 16, 2, 2); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...gray); doc.text(x[0], cx + 3, cy + 5.5); doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(...x[2]); doc.text(P(x[1]), cx + 3, cy + 12.5); });
   doc.setFont('helvetica', 'normal');
-  let y = 82;
-  if (!D.rows.length) { doc.setFontSize(10); doc.setTextColor(...gray); doc.text('No transactions in this date range.', M, y); return doc; }
+  let y = 38 + Math.ceil(kp.length / 3) * 20 + 4;
+  if (!D.rows.length && !D.pays.length) { doc.setFontSize(10); doc.setTextColor(...gray); doc.text('No transactions in this date range.', M, y); return doc; }
   const section = t => { if (y > 250) { doc.addPage(); y = 18; } doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(...ink); doc.text(t, M, y); doc.setDrawColor(222, 228, 238); doc.setLineWidth(0.3); doc.line(M, y + 2, W - M, y + 2); y += 5; doc.setFont('helvetica', 'normal'); };
   const table = (head, body, cols, parse) => { doc.autoTable({ startY: y, head: [head], body, margin: { left: M, right: M, bottom: 16 }, theme: 'plain', styles: { fontSize: 9, cellPadding: 1.8, textColor: ink, lineColor: [236, 240, 246], lineWidth: { bottom: 0.2 } }, headStyles: { textColor: gray, fontSize: 8, fontStyle: 'bold', lineColor: [210, 218, 230], lineWidth: { bottom: 0.3 } }, columnStyles: cols || {}, didParseCell: d => { const c = (cols || {})[d.column.index]; if (c && c.halign && d.section === 'head') d.cell.styles.halign = c.halign; if (parse) parse(d); } }); y = doc.lastAutoTable.finalY + 9; };
   const right = { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' } };
@@ -1064,6 +1070,15 @@ function uxReportPDFDoc() {
   if (D.exp.length) { section('Expense summary'); table(['Category', 'Txns', 'Amount', 'Share'], catRows(D.exp, D.expense), right); }
   if (D.core.some(t => !String(t.category || '').trim())) { doc.setFontSize(8); doc.setTextColor(...gray); doc.text('"Uncategorised" holds transactions saved without a category, so totals still match.', M, y - 4); y += 5; }
   const lo = D.loan;
+  if (D.cards.length || D.pays.length) {
+    section('Credit card payments');
+    if (D.cards.length) table(['Card', 'Spent on card', 'Paid', 'Owed today'], D.cards.map(x => { const owed = Math.max(0, num(x.card.balance)); return [P(x.card.name + (x.card.last4 ? ' ....' + x.card.last4 : '')), P(money(x.spent)), { content: P(money(x.paid)), styles: { textColor: green } }, { content: P(money(owed)), styles: { fontStyle: 'bold', textColor: owed > 0 ? red : green } }]; }), right);
+    if (D.pays.length) {
+      const tsx = { fontStyle: 'bold', fillColor: [243, 246, 251] };
+      table(['Date', 'Card', 'Paid from', 'Amount'], D.pays.slice().sort((a, b) => a.date.localeCompare(b.date)).map(p => [P(rpFmt(p.date)), P(p.cardName), P(p.accName + (p.note ? ' - ' + p.note : '')), { content: P(money(p.amount)), styles: { fontStyle: 'bold' } }]).concat([[{ content: 'Total paid', colSpan: 3, styles: tsx }, { content: P(money(D.payTotal)), styles: tsx }]]), { 3: { halign: 'right' } });
+    }
+    doc.setFontSize(8); doc.setTextColor(...gray); doc.text('Card payments settle spending already counted in your expenses, so they are not counted again.', M, y - 4); y += 5;
+  }
   if (lo.borrowed + lo.repaid + lo.lent + lo.back > 0) { section('Loan activity (not counted in income or expenses)'); const r = []; if (lo.borrowed) r.push(['Money borrowed', money(lo.borrowed)]); if (lo.repaid) r.push(['Loan repayments made', money(lo.repaid)]); if (lo.lent) r.push(['Money lent to others', money(lo.lent)]); if (lo.back) r.push(['Money received back', money(lo.back)]); table(['Item', 'Amount'], r, { 1: { halign: 'right' } }); }
   const spent = {}; D.exp.forEach(c => { spent[lc(c.name)] = c.total; });
   const buds = state.budgets.filter(b => !String(b.category).startsWith('__') && (spent[lc(b.category)] || 0) > 0);
@@ -1291,3 +1306,56 @@ document.addEventListener('click', e => {
   if (e.target.closest('[data-newplan]')) return uxPlanForm();
   const g = e.target.closest('[data-goto]'); if (g) switchView(g.dataset.goto);
 });
+
+
+/* ===== Credit card payments in History, Report and CSV ===== */
+function uxPayItems() {
+  return state.payments.map(p => {
+    const c = state.cards.find(x => x.id === String(p.cardId)), a = state.accounts.find(x => x.id === String(p.accountId));
+    return { id: String(p.id), date: String(p.date || '').slice(0, 10), cardId: String(p.cardId), accountId: String(p.accountId || ''), amount: num(p.amount), note: p.note || '', userId: p.userId, cardName: c ? c.name : 'Card', accName: a ? a.name : '-' };
+  }).filter(p => p.date);
+}
+function uxPayRow(p) {
+  return `<div class="tx-row pay-row" data-view-pay="${esc(p.id)}"><div class="tx-icon">💳</div><div class="tx-main"><b>Card payment · ${esc(p.cardName)}</b><small>${esc(p.date)} · from ${esc(p.accName)}${p.note ? ' · ' + esc(p.note) : ''}</small></div><strong class="pay">${money(p.amount)}</strong></div>`;
+}
+function uxPayDetail(id) {
+  const p = uxPayItems().find(x => x.id === id); if (!p) return;
+  const c = state.cards.find(x => x.id === p.cardId), owed = c ? Math.max(0, num(c.balance)) : 0;
+  uxSheet(`<div class="sheet-ic">💳</div><h3>Card payment</h3><div class="sheet-amt" style="color:var(--blue)">${money(p.amount)}</div><p>${esc(p.cardName)}${c && c.last4 ? ' ····' + esc(c.last4) : ''}<br>${esc(rpFmt(p.date))} · paid from ${esc(p.accName)}${p.note ? '<br>' + esc(p.note) : ''}<br>Recorded by ${esc(uxOwner(p.userId) || '—')}</p><p>This card owes ${money(owed)} today. Card payments are not counted as expenses again, because the spending was already counted.</p><div class="sheet-btns"><button data-close>Close</button></div>`);
+}
+function uxCardSectionHTML(D) {
+  if (!D.cards.length && !D.pays.length) return '';
+  let h = '<h2 class="rp-sec">💳 Credit card payments</h2>';
+  if (D.cards.length) h += `<table class="rp-t"><thead><tr><th>Card</th><th class="n">Spent on card</th><th class="n">Paid</th><th class="n">Owed today</th></tr></thead><tbody>${D.cards.map(x => { const owed = Math.max(0, num(x.card.balance)); return `<tr><td>💳 ${esc(x.card.name)}${x.card.last4 ? ' ····' + esc(x.card.last4) : ''}</td><td class="n">${money(x.spent)}</td><td class="n pos-t">${money(x.paid)}</td><td class="n ${owed > 0 ? 'neg-t' : 'pos-t'}">${money(owed)}</td></tr>`; }).join('')}</tbody></table>`;
+  if (D.pays.length) h += `<table class="rp-t" style="margin-top:12px"><thead><tr><th>Date</th><th>Card</th><th>Paid from</th><th class="n">Amount</th></tr></thead><tbody>${D.pays.slice().sort((a, b) => a.date.localeCompare(b.date)).map(p => `<tr><td>${esc(rpFmt(p.date))}</td><td>${esc(p.cardName)}</td><td>${esc(p.accName)}${p.note ? ' · ' + esc(p.note) : ''}</td><td class="n">${money(p.amount)}</td></tr>`).join('')}<tr class="rp-total"><td colspan="3">Total paid</td><td class="n">${money(D.payTotal)}</td></tr></tbody></table>`;
+  return h + '<p class="rp-note">Card payments settle spending already counted in your expenses, so they are not counted again.</p>';
+}
+function renderHistory() {
+  uxHistInit();
+  if (!$('history-type').querySelector('[value="payment"]')) $('history-type').insertAdjacentHTML('beforeend', '<option value="payment">💳 Card payments</option>');
+  const q = lc($('search').value || ''), type = $('history-type').value, mSel = $('history-month'), cSel = $('history-cat'), mCur = mSel.value, cCur = cSel.value;
+  const pays = uxPayItems(), SD = uxStartDay();
+  const dates = [...state.transactions.map(t => String(t.date).slice(0, 10)), ...pays.map(p => p.date), today()].filter(Boolean);
+  const months = [...new Set(dates.map(d => uxPeriodOfDate(d, SD).start))].sort().reverse();
+  const cats = [...new Set(state.transactions.map(t => t.category).filter(Boolean))].sort();
+  mSel.innerHTML = '<option value="">All time</option>' + months.map(m => `<option value="${m}">${uxPeriodLabel(uxPeriodOfDate(m, SD))}${m === uxPeriod(0).start ? ' (current)' : ''}</option>`).join('');
+  cSel.innerHTML = '<option value="">All categories</option>' + cats.map(c => `<option value="${esc(c)}">${catIcon(c)} ${esc(c)}</option>`).join('');
+  mSel.value = months.includes(mCur) ? mCur : ''; cSel.value = cats.includes(cCur) ? cCur : '';
+  const inRange = d => !mSel.value || inPeriod({ date: d }, uxPeriodOfDate(mSel.value, SD));
+  const txs = type === 'payment' ? [] : state.transactions.slice().reverse().filter(t => (type === 'all' || t.type === type) && inRange(String(t.date).slice(0, 10)) && (!cSel.value || t.category === cSel.value) && (!q || [t.category, t.subcategory, t.product, t.note, t.date].join(' ').toLowerCase().includes(q)));
+  const pl = (type === 'all' || type === 'payment') && !cSel.value ? pays.slice().reverse().filter(p => inRange(p.date) && (!q || [p.cardName, p.accName, p.note, p.date, 'card payment'].join(' ').toLowerCase().includes(q))) : [];
+  const items = [...txs.map(t => ({ t, d: String(t.date).slice(0, 10) })), ...pl.map(p => ({ p, d: p.date }))].sort((a, b) => b.d.localeCompare(a.d));
+  const sum = ty => txs.filter(t => t.type === ty && !isLoanTx(t)).reduce((s, t) => s + t.amount, 0), paid = pl.reduce((s, p) => s + p.amount, 0);
+  let html = `<div class="hist-sum"><span>${items.length} entries</span>${type === 'payment' ? '' : `<span class="pos">+${money(sum('income'))}</span><span class="neg">−${money(sum('expense'))}</span>`}${paid > 0 ? `<span class="paysum">💳 ${money(paid)}</span>` : ''}</div>`, last = '';
+  items.slice(0, HS.limit).forEach(it => { if (it.d !== last) { html += `<div class="day-head">${uxDay(it.d)}</div>`; last = it.d; } html += it.t ? txRow(it.t) : uxPayRow(it.p); });
+  if (items.length > HS.limit) html += `<button class="secondary wide" data-more="1">Show more (${items.length - HS.limit} left)</button>`;
+  $('history-list').innerHTML = items.length ? html : '<p class="empty">No matching entries.</p>';
+}
+function exportCsv() {
+  const cols = ['date', 'type', 'amount', 'category', 'subcategory', 'product', 'note', 'accountId', 'cardId', 'userId', 'isPrivate'], q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+  const payRow = p => { const o = { date: p.date, type: 'card_payment', amount: p.amount, category: 'Card payment', subcategory: p.cardName, product: 'Paid from ' + p.accName, note: p.note, accountId: p.accountId, cardId: p.cardId, userId: p.userId, isPrivate: '' }; return cols.map(k => q(o[k])).join(','); };
+  const lines = [cols.join(','), ...state.transactions.map(t => cols.map(k => q(t[k])).join(',')), ...uxPayItems().map(payRow)];
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' }), url = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = url; a.download = 'jamshi-transactions.csv'; a.click(); URL.revokeObjectURL(url);
+}
+document.addEventListener('click', e => { const b = e.target.closest('[data-view-pay]'); if (b) uxPayDetail(b.dataset.viewPay); });

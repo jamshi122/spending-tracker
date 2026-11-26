@@ -170,3 +170,7 @@ body.dark .pl-preview{background:#16304f;border-color:#2b4d7b;color:#bcd8ff}
 .plan-amt{text-align:right}.plan-amt small{display:block;color:var(--muted);font-size:11px;margin-top:2px}
 .done-plans{padding:10px 0 6px}.done-plans summary{cursor:pointer;color:var(--muted);font-size:13px;font-weight:700;padding:6px 0}
 #installments-box .loan-sum{margin-top:0}
+.pay-row strong.pay{color:var(--blue)}
+.pay-row .tx-icon{background:#e3eeff}
+body.dark .pay-row .tx-icon{background:#1f3a60}
+.hist-sum .paysum{color:var(--blue)}
