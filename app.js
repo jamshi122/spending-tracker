@@ -249,7 +249,7 @@ const UX = {
   exp: ['Food','Groceries','Fuel','Transport','Bills','Shopping','Health','Entertainment','Family','Other'],
   inc: ['Salary','Overtime','Bonus','Other income']
 };
-UX.icons = { loan: '🤝', ...UX.icons };
+UX.icons = { voucher: '🎟️', loan: '🤝', ...UX.icons };
 const UXS = { catOpen: true, subOpen: true, restored: false };
 
 function catIcon(name) {
@@ -298,7 +298,7 @@ function uxForm() {
 function uxRestoreLast() {
   try {
     const L = JSON.parse(localStorage.getItem('jamshi-last') || 'null'); if (!L) return;
-    if (L.method) $('tx-method').value = L.method;
+    if (L.method && L.method !== 'voucher') $('tx-method').value = L.method;
     if (L.acc && [...$('tx-account').options].some(o => o.value === L.acc)) $('tx-account').value = L.acc;
     if (L.card && [...$('tx-card').options].some(o => o.value === L.card)) $('tx-card').value = L.card;
     sourceFields();
@@ -314,7 +314,7 @@ function renderSelects() {
   const ids = ['tx-account', 'tx-card', 'budget-category', 'payment-card', 'payment-account'], keep = ids.map(i => [i, $(i).value]);
   const parents = state.categories.filter(c => !c.parentId && (!c.type || c.type === 'expense'));
   const accOpts = state.accounts.map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
-  $('tx-account').innerHTML = state.accounts.map(a => `<option value="${esc(a.id)}">${esc(a.name)} (${money(a.balance)})</option>`).join('');
+  uxRebuildTxAccount();
   $('tx-card').innerHTML = state.cards.map(c => `<option value="${esc(c.id)}">${esc(c.name)} (•••• ${esc(c.last4 || '')})</option>`).join('');
   $('budget-category').innerHTML = parents.map(c => `<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('');
   $('payment-card').innerHTML = state.cards.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
@@ -325,23 +325,23 @@ function renderAll() {
   $('user-label').textContent = `${state.user?.name || ''}${isAdmin() ? ' · Admin' : ''}`;
   $('admin-only').classList.toggle('hidden', !isAdmin());
   document.querySelectorAll('.admin-action').forEach(el => el.classList.toggle('hidden', !isAdmin()));
-  renderDashboard(); renderHistory(); renderAccounts(); renderLoans(); renderPayments(); renderInstallments(); renderUpcoming(); uxHeroInst(); renderSelects(); renderBudgets(); renderAdmin(); uxSettingsUI(); uxForm();
+  renderDashboard(); renderHistory(); renderAccounts(); renderLoans(); renderPayments(); renderInstallments(); renderVouchers(); uxMethodOptions(); renderUpcoming(); uxHeroInst(); renderSelects(); renderBudgets(); renderAdmin(); uxSettingsUI(); uxForm();
   if (!UXS.restored && state.accounts.length) { uxRestoreLast(); UXS.restored = true; }
 }
 
 /* ---------- Rows & dashboard ---------- */
 function txRow(t) {
   const inc = t.type === 'income';
-  return `<div class="tx-row" data-view-tx="${esc(t.id)}"><div class="tx-icon">${catIcon(t.category)}</div><div class="tx-main"><b>${esc(t.category || t.type)}${t.subcategory ? ' · ' + esc(t.subcategory) : ''}</b><small>${esc(String(t.date).slice(0, 10))} · ${esc(t.product || t.note || '')}${t.receiptUrl ? ' · 📎' : ''}</small></div><strong class="${t.type}">${inc ? '+' : '−'}${money(t.amount)}</strong></div>`;
+  return `<div class="tx-row" data-view-tx="${esc(t.id)}"><div class="tx-icon">${catIcon(t.category)}</div><div class="tx-main"><b>${esc(t.category || t.type)}${t.subcategory ? ' · ' + esc(t.subcategory) : ''}</b><small>${esc(String(t.date).slice(0, 10))} · ${esc(t.product || t.note || '')}${t.receiptUrl ? ' · 📎' : ''}${isVoucherPay(t) ? ' · not counted as expense' : (!t.cardId && uxIsVoucherAccId(t.accountId) ? ' · 🎟️ voucher' : '')}</small></div><strong class="${t.type}">${inc ? '+' : '−'}${money(t.amount)}</strong></div>`;
 }
 function renderDashboard() {
-  const cash = state.accounts.reduce((s, a) => s + num(a.balance), 0);
+  const cash = uxCash();
   const debt = state.cards.reduce((s, c) => s + Math.max(0, num(c.balance)), 0);
-  const P = uxPeriod(UXM.offset), recent = state.transactions.filter(t => inPeriod(t, P) && !isLoanTx(t));
+  const P = uxPeriod(UXM.offset), recent = state.transactions.filter(t => inPeriod(t, P) && !isLoanTx(t) && !isVoucherPay(t));
   const LS = uxLoans(), loanOwe = LS.owe.reduce((s, p) => s + Math.max(0, p.total), 0), loanLent = LS.lent.reduce((s, p) => s + Math.max(0, p.total), 0);
   const income = recent.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
   const expense = recent.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
-  $('net-worth').textContent = money(cash - debt - loanOwe + loanLent - uxInstRemaining());
+  $('net-worth').textContent = money(cash + uxVoucherTotal() - debt - loanOwe + loanLent - uxInstRemaining());
   let ls = $('loan-stat'); if (!ls) { ls = document.createElement('span'); ls.id = 'loan-stat'; document.querySelector('.hero-stats').appendChild(ls); }
   ls.innerHTML = `Loans (net) <b>${loanLent - loanOwe < 0 ? '−' : ''}${money(Math.abs(loanLent - loanOwe))}</b>`; $('cash-total').textContent = money(cash); $('debt-total').textContent = money(debt);
   $('income-total').textContent = money(income); $('expense-total').textContent = money(expense); $('saved-total').textContent = money(income - expense);
@@ -354,7 +354,7 @@ function renderDashboard() {
   const groups = {}; recent.filter(t => t.type === 'expense').forEach(t => { const k = t.category || 'Other'; groups[k] = (groups[k] || 0) + t.amount; });
   const top = Object.entries(groups).sort((a, b) => b[1] - a[1]).slice(0, 6);
   const month = {};
-  state.transactions.filter(t => t.type === 'expense' && !isLoanTx(t) && inPeriod(t, P)).forEach(t => { month[t.category] = (month[t.category] || 0) + t.amount; });
+  state.transactions.filter(t => t.type === 'expense' && !isLoanTx(t) && !isVoucherPay(t) && inPeriod(t, P)).forEach(t => { month[t.category] = (month[t.category] || 0) + t.amount; });
   const rows = top.map(([k, v]) => `<div class="summary-row"><span>${catIcon(k)} ${esc(k)}</span><b>${money(v)}</b></div>`).join('');
   const buds = state.budgets.filter(b => !String(b.category).startsWith('__')).map(b => {
     const sp = month[b.category] || 0, amt = num(b.amount), pct = amt > 0 ? Math.min(100, sp / amt * 100) : 0;
@@ -403,9 +403,10 @@ async function saveTransaction(ev) {
   ev.preventDefault();
   const amount = num($('tx-amount').value), type = $('tx-type').value, method = $('tx-method').value;
   if (amount <= 0) return toast('Enter an amount greater than zero.', 'error');
-  const data = { date: $('tx-date').value, type, amount, category: $('tx-category').value, subcategory: $('tx-subcategory').value, product: $('tx-product').value.trim(), note: $('tx-note').value.trim(), accountId: method === 'account' ? $('tx-account').value : '', cardId: method === 'card' ? $('tx-card').value : '', isPrivate: $('tx-private').checked };
+  const data = { date: $('tx-date').value, type, amount, category: $('tx-category').value, subcategory: $('tx-subcategory').value, product: $('tx-product').value.trim(), note: $('tx-note').value.trim(), accountId: (method === 'account' || method === 'voucher') ? $('tx-account').value : '', cardId: method === 'card' ? $('tx-card').value : '', isPrivate: $('tx-private').checked };
   if (!data.category) return toast('Choose a category.', 'error');
-  if ((method === 'account' && !data.accountId) || (method === 'card' && !data.cardId)) return toast('Select an account or card.', 'error');
+  if (((method === 'account' || method === 'voucher') && !data.accountId) || (method === 'card' && !data.cardId)) return toast('Select an account or card.', 'error');
+  if (method === 'voucher' && type === 'expense') { const va = state.accounts.find(a => a.id === data.accountId); if (va && amount > num(va.balance) + 0.005) return toast('Not enough voucher balance (' + money(va.balance) + ' left).', 'error'); }
   const editId = $('tx-edit-id').value, file = $('tx-receipt').files?.[0] || null;
   const isFuel = !editId && type === 'expense' && data.category.toLowerCase() === 'fuel';
   const fuel = isFuel ? { vehicle: $('fuel-vehicle').value.trim(), odometer: num($('fuel-odometer').value), liters: num($('fuel-liters').value), pricePerLiter: num($('fuel-price').value), fullTank: $('fuel-full').checked } : null;
@@ -468,7 +469,7 @@ function openTransaction(id) {
       sel.value = tx.category;
       $('tx-date').value = String(tx.date).slice(0, 10); $('tx-amount').value = tx.amount;
       $('tx-subcategory').value = tx.subcategory || ''; $('tx-product').value = tx.product || ''; $('tx-note').value = tx.note || '';
-      $('tx-private').checked = tx.isPrivate; $('tx-method').value = tx.cardId ? 'card' : 'account'; sourceFields();
+      $('tx-private').checked = tx.isPrivate; const vAcc = !tx.cardId && uxIsVoucherAccId(tx.accountId); uxMethodOptions(vAcc); $('tx-method').value = tx.cardId ? 'card' : (vAcc ? 'voucher' : 'account'); sourceFields();
       if (tx.cardId) $('tx-card').value = tx.cardId; else $('tx-account').value = tx.accountId;
       $('ux-more').open = !!(tx.product || tx.note || tx.receiptUrl || tx.isPrivate);
       UXS.catOpen = false; UXS.subOpen = !tx.subcategory; uxChips(); uxSubs();
@@ -623,7 +624,7 @@ function uxLoanForm(mode, name = '') {
   const M = { borrow: ['Borrowed money', 'income', 'Loan Borrowed'], repay: ['Repay loan', 'expense', 'Loan Repayment'], lend: ['Lent money', 'expense', 'Loan Given'], recv: ['Money received back', 'income', 'Loan Received Back'] }[mode];
   const dir = (mode === 'borrow' || mode === 'repay') ? 'borrow' : 'lend', withRate = mode === 'borrow' || mode === 'lend';
   const L = uxLoans(), names = (dir === 'borrow' ? L.owe : L.lent).map(p => `<option value="${esc(p.name)}">`).join('');
-  uxSheet(`<h3>${M[0]}</h3><div class="lf"><label>Person</label><input id="lf-name" list="lf-names" value="${esc(name)}" placeholder="Name"><datalist id="lf-names">${names}</datalist></div><div class="lf"><label>Amount (QR)</label><input id="lf-amt" type="number" inputmode="decimal" step="0.01" min="0.01" placeholder="0.00"></div><div class="lf"><label>Date</label><input id="lf-date" type="date" value="${today()}"></div><div class="lf"><label>${M[1] === 'income' ? 'Money goes into' : 'Paid from'}</label><select id="lf-acc">${state.accounts.map(a => `<option value="${esc(a.id)}">${esc(a.name)} (${money(a.balance)})</option>`).join('')}</select></div>${withRate ? '<div class="lf"><label>Interest % per year (optional)</label><input id="lf-rate" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0"></div>' : ''}<div class="lf"><label>Note (optional)</label><input id="lf-note"></div><div class="sheet-btns"><button data-save="1" class="save-btn">Save</button><button data-close>Cancel</button></div>`,
+  uxSheet(`<h3>${M[0]}</h3><div class="lf"><label>Person</label><input id="lf-name" list="lf-names" value="${esc(name)}" placeholder="Name"><datalist id="lf-names">${names}</datalist></div><div class="lf"><label>Amount (QR)</label><input id="lf-amt" type="number" inputmode="decimal" step="0.01" min="0.01" placeholder="0.00"></div><div class="lf"><label>Date</label><input id="lf-date" type="date" value="${today()}"></div><div class="lf"><label>${M[1] === 'income' ? 'Money goes into' : 'Paid from'}</label><select id="lf-acc">${uxCashAccounts().map(a => `<option value="${esc(a.id)}">${esc(a.name)} (${money(a.balance)})</option>`).join('')}</select></div>${withRate ? '<div class="lf"><label>Interest % per year (optional)</label><input id="lf-rate" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0"></div>' : ''}<div class="lf"><label>Note (optional)</label><input id="lf-note"></div><div class="sheet-btns"><button data-save="1" class="save-btn">Save</button><button data-close>Cancel</button></div>`,
     async (e, close) => {
       if (!e.target.closest('[data-save]')) return;
       const nm = $('lf-name').value.trim(), amt = num($('lf-amt').value), acc = $('lf-acc').value, rate = withRate ? num($('lf-rate').value) : 0;
@@ -733,7 +734,7 @@ function uxForm() {
 }
 function renderSelects() {
   const ids = ['tx-account', 'tx-card', 'budget-category', 'payment-card', 'payment-account'], keep = ids.map(i => [i, $(i).value]);
-  $('tx-account').innerHTML = state.accounts.map(a => `<option value="${esc(a.id)}">${esc(a.name)} (${money(a.balance)})</option>`).join('');
+  uxRebuildTxAccount();
   $('tx-card').innerHTML = state.cards.map(c => `<option value="${esc(c.id)}">${esc(c.name)} (•••• ${esc(c.last4 || '')})</option>`).join('');
   $('budget-category').innerHTML = uxCatList('expense').map(c => `<option value="${esc(c.name)}">${esc(c.name)}</option>`).join('');
   $('payment-card').innerHTML = state.cards.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
@@ -912,7 +913,7 @@ const rpFmt = ds => new Date(ds + 'T00:00:00').toLocaleDateString('en-GB', { day
 const rpSigned = v => (v < 0 ? '−' : '') + money(Math.abs(v));
 function uxReportData(from, to) {
   const rows = state.transactions.filter(t => { const d = String(t.date).slice(0, 10); return d >= from && d <= to; });
-  const core = rows.filter(t => !isLoanTx(t));
+  const core = rows.filter(t => !isLoanTx(t) && !isVoucherPay(t));
   const agg = type => {
     const cats = {};
     core.filter(t => t.type === type).forEach(t => {
@@ -931,7 +932,8 @@ function uxReportData(from, to) {
   rows.filter(t => t.type === 'expense' && t.cardId && cardMap[t.cardId]).forEach(t => { cardMap[t.cardId].spent += t.amount; });
   pays.forEach(p => { if (cardMap[p.cardId]) cardMap[p.cardId].paid += p.amount; });
   const cards = Object.values(cardMap).filter(x => x.spent > 0 || x.paid > 0), cardSpent = cards.reduce((s, x) => s + x.spent, 0);
-  return { rows, core, inc, exp, income: sum(inc), expense: sum(exp), loan, pays, payTotal, cards, cardSpent };
+  const plansAll = uxPlans(), vouchers = state.accounts.filter(uxIsVoucherAcc).map(a => { const spent = rows.filter(t => t.type === 'expense' && t.accountId === a.id).reduce((s, t) => s + t.amount, 0), plan = plansAll.find(p => p.accId === a.id), paidIn = plan ? plan.txs.filter(t => String(t.date).slice(0, 10) >= from && String(t.date).slice(0, 10) <= to).reduce((s, t) => s + t.amount, 0) : 0; return { acc: a, spent, plan, paidIn }; }).filter(v => v.spent > 0 || v.paidIn > 0);
+  return { rows, core, inc, exp, income: sum(inc), expense: sum(exp), loan, pays, payTotal, cards, cardSpent, vouchers };
 }
 function rpCatTable(list, total, type) {
   const body = list.map(c => {
@@ -950,7 +952,7 @@ function uxReportHTML(from, to) {
   const D = uxReportData(from, to), days = Math.round((new Date(to + 'T00:00:00') - new Date(from + 'T00:00:00')) / 864e5) + 1;
   const net = D.income - D.expense, rate = D.income > 0 ? (net / D.income * 100).toFixed(1) + '%' : '—';
   const L = uxLoans(), loanNet = L.lent.reduce((s, p) => s + Math.max(0, p.total), 0) - L.owe.reduce((s, p) => s + Math.max(0, p.total), 0);
-  const cash = state.accounts.reduce((s, a) => s + num(a.balance), 0), debt = state.cards.reduce((s, c) => s + Math.max(0, num(c.balance)), 0);
+  const cash = uxCash(), debt = state.cards.reduce((s, c) => s + Math.max(0, num(c.balance)), 0);
   const SD = uxStartDay(), per = uxPeriodOfDate(from, SD), isPeriod = per.start === from && per.end === to;
   let h = `<div class="rp-head"><div><h1>Spending Report</h1><small>${rpFmt(from)} – ${rpFmt(to)} · ${days} day${days > 1 ? 's' : ''}</small><small>Prepared for ${esc(state.user?.name || '')}</small></div><div class="rp-logo">JS</div></div>`;
   h += `<div class="rp-kpis"><div class="rp-kpi in"><small>Total income</small><b>${money(D.income)}</b></div><div class="rp-kpi out"><small>Total expenses</small><b>${money(D.expense)}</b></div><div class="rp-kpi"><small>Net saved</small><b class="${net < 0 ? 'neg-t' : 'pos-t'}">${rpSigned(net)}</b></div><div class="rp-kpi"><small>Savings rate</small><b>${rate}</b></div><div class="rp-kpi"><small>Avg daily spending</small><b>${money(D.expense / days)}</b></div><div class="rp-kpi"><small>Transactions</small><b>${D.core.length}</b></div><div class="rp-kpi"><small>Card payments</small><b style="color:#1769e0">${money(D.payTotal)}</b></div><div class="rp-kpi"><small>Spent on cards</small><b>${money(D.cardSpent)}</b></div></div>`;
@@ -960,13 +962,14 @@ function uxReportHTML(from, to) {
   if (D.core.some(t => !String(t.category || '').trim())) h += '<p class="rp-note">“Uncategorised” holds transactions saved without a category, so totals still match.</p>';
   const lo = D.loan;
   h += uxCardSectionHTML(D);
+  h += uxVoucherSectionHTML(D);
   if (lo.borrowed + lo.repaid + lo.lent + lo.back > 0) h += `<h2 class="rp-sec">🤝 Loan activity <small>(not counted in income or expenses)</small></h2><table class="rp-t"><tbody>${lo.borrowed ? `<tr><td>Money borrowed</td><td class="n">${money(lo.borrowed)}</td></tr>` : ''}${lo.repaid ? `<tr><td>Loan repayments made</td><td class="n">${money(lo.repaid)}</td></tr>` : ''}${lo.lent ? `<tr><td>Money lent to others</td><td class="n">${money(lo.lent)}</td></tr>` : ''}${lo.back ? `<tr><td>Money received back</td><td class="n">${money(lo.back)}</td></tr>` : ''}</tbody></table>`;
   const spent = {}; D.exp.forEach(c => { spent[lc(c.name)] = c.total; });
   const buds = state.budgets.filter(b => !String(b.category).startsWith('__') && (spent[lc(b.category)] || 0) > 0);
   if (isPeriod && buds.length) {
     h += `<h2 class="rp-sec">🎯 Budget vs actual</h2><table class="rp-t"><thead><tr><th>Category</th><th class="n">Budget</th><th class="n">Spent</th><th class="n">Left</th></tr></thead><tbody>${buds.map(b => { const sp = spent[lc(b.category)] || 0, left = num(b.amount) - sp; return `<tr><td>${catIcon(b.category)} ${esc(b.category)}</td><td class="n">${money(b.amount)}</td><td class="n">${money(sp)}</td><td class="n ${left < 0 ? 'neg-t' : 'pos-t'}">${rpSigned(left)}</td></tr>`; }).join('')}</tbody></table>`;
   }
-  h += `<h2 class="rp-sec">📌 Position today <small>(${rpFmt(today())})</small></h2><table class="rp-t"><tbody><tr><td>Cash &amp; bank</td><td class="n">${money(cash)}</td></tr><tr><td>Credit card debt</td><td class="n">${money(debt)}</td></tr><tr><td>Loans (net)</td><td class="n">${rpSigned(loanNet)}</td></tr>${uxInstRemaining() > 0.005 ? `<tr><td>Installments remaining</td><td class="n">${money(uxInstRemaining())}</td></tr>` : ''}<tr class="rp-total"><td>Net worth</td><td class="n">${rpSigned(cash - debt + loanNet - uxInstRemaining())}</td></tr></tbody></table>`;
+  h += `<h2 class="rp-sec">📌 Position today <small>(${rpFmt(today())})</small></h2><table class="rp-t"><tbody><tr><td>Cash &amp; bank</td><td class="n">${money(cash)}</td></tr>${uxVoucherTotal() > 0.005 ? `<tr><td>Voucher balance</td><td class="n">${money(uxVoucherTotal())}</td></tr>` : ''}<tr><td>Credit card debt</td><td class="n">${money(debt)}</td></tr><tr><td>Loans (net)</td><td class="n">${rpSigned(loanNet)}</td></tr>${uxInstRemaining() > 0.005 ? `<tr><td>Installments remaining</td><td class="n">${money(uxInstRemaining())}</td></tr>` : ''}<tr class="rp-total"><td>Net worth</td><td class="n">${rpSigned(cash + uxVoucherTotal() - debt + loanNet - uxInstRemaining())}</td></tr></tbody></table>`;
   if (RP.list) {
     const items = D.rows.slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
     h += `<h2 class="rp-sec">🧾 All transactions (${items.length})</h2><table class="rp-t"><thead><tr><th>Date</th><th>Category</th><th>Details</th><th class="n">Amount</th></tr></thead><tbody>${items.map(t => `<tr><td>${esc(String(t.date).slice(5, 10))}</td><td>${esc(t.category || '—')}${t.subcategory ? ' · ' + esc(t.subcategory) : ''}</td><td>${esc(t.product || t.note || '')}</td><td class="n ${t.type === 'income' ? 'pos-t' : 'neg-t'}">${t.type === 'income' ? '+' : '−'}${money(t.amount)}</td></tr>`).join('')}</tbody></table>`;
@@ -1036,7 +1039,7 @@ function uxReportPDFDoc() {
   const ink = [23, 32, 51], gray = [113, 128, 150], blue = [23, 105, 224], green = [21, 148, 90], red = [220, 76, 76];
   const D = uxReportData(from, to), days = Math.round((new Date(to + 'T00:00:00') - new Date(from + 'T00:00:00')) / 864e5) + 1, net = D.income - D.expense;
   const L = uxLoans(), loanNet = L.lent.reduce((s, p) => s + Math.max(0, p.total), 0) - L.owe.reduce((s, p) => s + Math.max(0, p.total), 0);
-  const cash = state.accounts.reduce((s, a) => s + num(a.balance), 0), debt = state.cards.reduce((s, c) => s + Math.max(0, num(c.balance)), 0);
+  const cash = uxCash(), debt = state.cards.reduce((s, c) => s + Math.max(0, num(c.balance)), 0);
   const per = uxPeriodOfDate(from, uxStartDay()), isPeriod = per.start === from && per.end === to;
   doc.setFillColor(...blue); doc.roundedRect(W - M - 14, 12, 14, 14, 3, 3, 'F'); doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text('JS', W - M - 7, 21, { align: 'center' });
   doc.setTextColor(...ink); doc.setFontSize(20); doc.text('Spending Report', M, 19);
@@ -1079,6 +1082,11 @@ function uxReportPDFDoc() {
     }
     doc.setFontSize(8); doc.setTextColor(...gray); doc.text('Card payments settle spending already counted in your expenses, so they are not counted again.', M, y - 4); y += 5;
   }
+  if (D.vouchers.length) {
+    section('Voucher balance');
+    table(['Voucher', 'Spent', 'Paid for it', 'Balance', 'To pay'], D.vouchers.map(v => [P(v.acc.name), P(money(v.spent)), P(money(v.paidIn)), { content: P(money(Math.max(0, num(v.acc.balance)))), styles: { textColor: green, fontStyle: 'bold' } }, { content: P(money(v.plan ? v.plan.remaining : 0)), styles: { textColor: v.plan && !v.plan.done ? red : ink } }]), { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } });
+    doc.setFontSize(8); doc.setTextColor(...gray); doc.text('Voucher purchases are counted in the expense categories. Money paid to settle a voucher is not an expense.', M, y - 4); y += 5;
+  }
   if (lo.borrowed + lo.repaid + lo.lent + lo.back > 0) { section('Loan activity (not counted in income or expenses)'); const r = []; if (lo.borrowed) r.push(['Money borrowed', money(lo.borrowed)]); if (lo.repaid) r.push(['Loan repayments made', money(lo.repaid)]); if (lo.lent) r.push(['Money lent to others', money(lo.lent)]); if (lo.back) r.push(['Money received back', money(lo.back)]); table(['Item', 'Amount'], r, { 1: { halign: 'right' } }); }
   const spent = {}; D.exp.forEach(c => { spent[lc(c.name)] = c.total; });
   const buds = state.budgets.filter(b => !String(b.category).startsWith('__') && (spent[lc(b.category)] || 0) > 0);
@@ -1087,7 +1095,7 @@ function uxReportPDFDoc() {
     table(['Category', 'Budget', 'Spent', 'Left'], buds.map(b => { const sp = spent[lc(b.category)] || 0, left = num(b.amount) - sp; return [P(b.category), P(money(b.amount)), P(money(sp)), { content: P(rpSigned(left)), styles: { textColor: left < 0 ? red : green, fontStyle: 'bold' } }]; }), right);
   }
   section('Position today (' + P(rpFmt(today())) + ')');
-  table(['Item', 'Amount'], [['Cash & bank', P(money(cash))], ['Credit card debt', P(money(debt))], ['Loans (net)', P(rpSigned(loanNet))], ...(uxInstRemaining() > 0.005 ? [['Installments remaining', P(money(uxInstRemaining()))]] : []), [{ content: 'Net worth', styles: { fontStyle: 'bold', fillColor: [243, 246, 251] } }, { content: P(rpSigned(cash - debt + loanNet - uxInstRemaining())), styles: { fontStyle: 'bold', fillColor: [243, 246, 251] } }]], { 1: { halign: 'right' } });
+  table(['Item', 'Amount'], [['Cash & bank', P(money(cash))], ...(uxVoucherTotal() > 0.005 ? [['Voucher balance', P(money(uxVoucherTotal()))]] : []), ['Credit card debt', P(money(debt))], ['Loans (net)', P(rpSigned(loanNet))], ...(uxInstRemaining() > 0.005 ? [['Installments remaining', P(money(uxInstRemaining()))]] : []), [{ content: 'Net worth', styles: { fontStyle: 'bold', fillColor: [243, 246, 251] } }, { content: P(rpSigned(cash + uxVoucherTotal() - debt + loanNet - uxInstRemaining())), styles: { fontStyle: 'bold', fillColor: [243, 246, 251] } }]], { 1: { halign: 'right' } });
   if (RP.list) {
     const items = D.rows.slice().sort((a, b) => String(a.date).localeCompare(String(b.date)));
     section('All transactions (' + items.length + ')');
@@ -1115,7 +1123,7 @@ async function uxReportSavePDF() {
 /* ===== Credit card payment: sheet flow, Pay buttons, payment history ===== */
 const uxOwner = o => { const n = userName(o); return n === '—' ? (o || '') : n; };
 function renderAccounts() {
-  $('accounts-list').innerHTML = state.accounts.map(a => `<div class="account-row"><div><b>${esc(a.name)}</b><small>${esc(a.type || 'Account')} · ${esc(uxOwner(a.owner))}</small></div><strong>${money(a.balance)}</strong></div>`).join('') || '<p class="empty">No accounts.</p>';
+  $('accounts-list').innerHTML = state.accounts.filter(a => !uxIsVoucherAcc(a)).map(a => `<div class="account-row"><div><b>${esc(a.name)}</b><small>${esc(a.type || 'Account')} · ${esc(uxOwner(a.owner))}</small></div><strong>${money(a.balance)}</strong></div>`).join('') || '<p class="empty">No accounts.</p>';
   $('cards-list').innerHTML = state.cards.map(c => {
     const owed = Math.max(0, num(c.balance)), avail = Math.max(0, num(c.limit) - owed);
     return `<div class="account-row"><div><b>💳 ${esc(c.name)} ·•••• ${esc(c.last4 || '')}</b><small>Limit ${money(c.limit)} · Available ${money(avail)}${uxDue(c)}</small></div><div class="card-right"><strong class="${owed > 0 ? 'neg' : ''}">${owed > 0 ? '−' : ''}${money(owed)}</strong>${owed > 0 ? `<button type="button" class="pay-btn" data-pay="${esc(c.id)}">Pay</button>` : ''}</div></div>`;
@@ -1139,7 +1147,7 @@ function uxPayForm(cardId) {
   if (!state.accounts.length) return toast('Add a cash/bank account first.', 'error');
   const owedOf = c => Math.max(0, num(c.balance)), byId = id => state.cards.find(c => c.id === String(id));
   const pick = byId(cardId) || state.cards.find(c => owedOf(c) > 0) || state.cards[0];
-  uxSheet(`<div class="sheet-ic">💳</div><h3>Pay credit card</h3><div class="lf"><label>Card</label><select id="pf-card">${state.cards.map(c => `<option value="${esc(c.id)}">${esc(c.name)} ·•••• ${esc(c.last4 || '')}</option>`).join('')}</select></div><div class="pf-owed" id="pf-owed"></div><div class="lf"><label>Amount (QR)</label><input id="pf-amt" type="number" inputmode="decimal" step="0.01" min="0.01" placeholder="0.00"><div class="chips"><button type="button" class="chip" data-fill="full">Pay full amount</button><button type="button" class="chip" data-fill="half">Half</button></div></div><div class="lf"><label>Pay from</label><select id="pf-acc">${state.accounts.map(a => `<option value="${esc(a.id)}">${esc(a.name)} (${money(a.balance)})</option>`).join('')}</select></div><div class="lf"><label>Date</label><input id="pf-date" type="date" value="${today()}"></div><div class="lf"><label>Note (optional)</label><input id="pf-note"></div><div class="sheet-btns"><button data-save="1" class="save-btn">Record payment</button><button data-close>Cancel</button></div>`,
+  uxSheet(`<div class="sheet-ic">💳</div><h3>Pay credit card</h3><div class="lf"><label>Card</label><select id="pf-card">${state.cards.map(c => `<option value="${esc(c.id)}">${esc(c.name)} ·•••• ${esc(c.last4 || '')}</option>`).join('')}</select></div><div class="pf-owed" id="pf-owed"></div><div class="lf"><label>Amount (QR)</label><input id="pf-amt" type="number" inputmode="decimal" step="0.01" min="0.01" placeholder="0.00"><div class="chips"><button type="button" class="chip" data-fill="full">Pay full amount</button><button type="button" class="chip" data-fill="half">Half</button></div></div><div class="lf"><label>Pay from</label><select id="pf-acc">${uxCashAccounts().map(a => `<option value="${esc(a.id)}">${esc(a.name)} (${money(a.balance)})</option>`).join('')}</select></div><div class="lf"><label>Date</label><input id="pf-date" type="date" value="${today()}"></div><div class="lf"><label>Note (optional)</label><input id="pf-note"></div><div class="sheet-btns"><button data-save="1" class="save-btn">Record payment</button><button data-close>Cancel</button></div>`,
     async (e, close) => {
       const c = byId($('pf-card').value), a = state.accounts.find(x => x.id === $('pf-acc').value);
       const fill = e.target.closest('[data-fill]')?.dataset.fill;
@@ -1229,7 +1237,7 @@ function renderUpcoming() {
 function uxPlanDetail(id) {
   const p = uxPlans().find(x => x.id === id); if (!p) return;
   const sched = p.items.map(it => { const od = !it.paid && it.date < today(); return `<div class="lh"><span>${it.k === 0 ? 'First payment' : 'Installment ' + it.k}<small>${esc(rpFmt(it.date))}${it.paid ? ' · paid' : od ? ' · overdue' : ''}</small></span><b class="${it.paid ? 'pos' : od ? 'neg' : ''}">${it.paid ? '✓ ' : ''}${money(it.amount)}</b></div>`; }).join('');
-  uxSheet(`<div class="sheet-ic">${catIcon(p.category)}</div><h3>${esc(p.name)}</h3><div class="sheet-amt ${p.done ? 'income' : 'expense'}">${p.done ? 'Fully paid ✓' : money(p.remaining) + ' left'}</div><p>Total ${money(p.total)}${p.fee > 0 ? ' (incl. fee ' + money(p.fee) + ')' : ''} · paid ${money(p.paid)}<br>${esc(p.category)}${p.subcategory ? ' · ' + esc(p.subcategory) : ''}</p><div class="sheet-btns">${p.done ? '' : `<button data-do="pay">💸 Pay ${money(Math.min(p.next.amount, p.remaining))}</button>`}<button class="del" data-do="del">🗑️ Delete plan</button><button data-close>Close</button></div><h4 class="mini-title">Schedule</h4>${sched}`,
+  uxSheet(`<div class="sheet-ic">${catIcon(p.category)}</div><h3>${esc(p.name)}</h3><div class="sheet-amt ${p.done ? 'income' : 'expense'}">${p.done ? 'Fully paid ✓' : money(p.remaining) + ' left'}</div><p>Total ${money(p.total)}${p.fee > 0 ? ' (incl. fee ' + money(p.fee) + ')' : ''} · paid ${money(p.paid)}<br>${p.voucher ? '🎟️ Voucher balance — spend it from the Add screen' : esc(p.category) + (p.subcategory ? ' · ' + esc(p.subcategory) : '')}</p><div class="sheet-btns">${p.done ? '' : `<button data-do="pay">💸 Pay ${money(Math.min(p.next.amount, p.remaining))}</button>`}<button class="del" data-do="del">🗑️ Delete plan</button><button data-close>Close</button></div><h4 class="mini-title">Schedule</h4>${sched}`,
     async (e, close) => {
       const d = e.target.closest('[data-do]')?.dataset.do; if (!d) return;
       if (d === 'pay') { close(); return uxInstPay(id); }
@@ -1244,7 +1252,7 @@ function uxPlanDetail(id) {
 function uxInstPay(id) {
   const p = uxPlans().find(x => x.id === id); if (!p || p.done) return;
   const amt0 = Math.min(p.next.amount, p.remaining);
-  const srcOpts = state.accounts.map(a => `<option value="acc:${esc(a.id)}">${esc(a.name)} (${money(a.balance)})</option>`).join('') + state.cards.map(c => `<option value="card:${esc(c.id)}">💳 ${esc(c.name)}</option>`).join('');
+  const srcOpts = uxCashAccounts().map(a => `<option value="acc:${esc(a.id)}">${esc(a.name)} (${money(a.balance)})</option>`).join('') + state.cards.map(c => `<option value="card:${esc(c.id)}">💳 ${esc(c.name)}</option>`).join('');
   uxSheet(`<div class="sheet-ic">🛒</div><h3>Pay ${esc(p.name)}</h3><div class="pf-owed">${p.next.extra ? 'Remaining balance' : 'Installment ' + p.next.k + ' of ' + p.n} · due ${esc(rpFmt(p.next.date))} · ${money(p.remaining)} left in total</div><div class="lf"><label>Amount (QR)</label><input id="ip-amt" type="number" inputmode="decimal" step="0.01" min="0.01" value="${amt0.toFixed(2)}"><div class="chips"><button type="button" class="chip" data-all="1">Pay everything left (${money(p.remaining)})</button></div></div><div class="lf"><label>Pay from</label><select id="ip-src">${srcOpts}</select></div><div class="lf"><label>Date</label><input id="ip-date" type="date" value="${today()}"></div><div class="sheet-btns"><button data-save="1" class="save-btn">Record payment</button><button data-close>Cancel</button></div>`,
     async (e, close) => {
       if (e.target.closest('[data-all]')) { $('ip-amt').value = p.remaining.toFixed(2); return; }
@@ -1266,8 +1274,8 @@ function uxInstPay(id) {
 function uxPlanForm() {
   if (!state.accounts.length && !state.cards.length) return toast('Add an account or card first.', 'error');
   const cats = uxCatList('expense').map(c => c.name), defCat = cats.find(c => lc(c) === 'shopping') || cats[0];
-  const srcOpts = state.accounts.map(a => `<option value="acc:${esc(a.id)}">${esc(a.name)} (${money(a.balance)})</option>`).join('') + state.cards.map(c => `<option value="card:${esc(c.id)}">💳 ${esc(c.name)}</option>`).join('');
-  uxSheet(`<h3>🛒 New pay-later plan</h3><div class="lf"><label>What did you buy?</label><input id="pl-name" placeholder="e.g. iPhone"></div><div class="lf"><label>Category</label><select id="pl-cat">${cats.map(c => `<option value="${esc(c)}">${catIcon(c)} ${esc(c)}</option>`).join('')}</select></div><div class="lf"><label>Subcategory</label><select id="pl-sub"></select></div><div class="lf"><label>Price (QR)</label><input id="pl-price" type="number" inputmode="decimal" step="0.01" min="0" placeholder="5000"></div><div class="lf"><label>Extra fee / interest (optional)</label><input id="pl-fee" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0"></div><div class="lf"><label>Installments after the first payment</label><div class="chips">${[4, 6, 8, 12].map(n => `<button type="button" class="chip ${n === 4 ? 'on' : ''}" data-n="${n}">${n}</button>`).join('')}<input id="pl-n" class="n-input" type="number" inputmode="numeric" min="1" max="60" value="4"></div></div><div class="lf"><label>Pay now (first payment)</label><input id="pl-down" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0"><div class="chips"><button type="button" class="chip" data-equal="1">Equal share</button></div></div><div class="lf"><label>Next installment due</label><input id="pl-start" type="date" value="${uxAddMonths(today(), 1)}"></div><div class="lf"><label>Pay from</label><select id="pl-src">${srcOpts}</select></div><div class="pl-preview" id="pl-prev">Enter the price to see the plan.</div><div class="sheet-btns"><button data-save="1" class="save-btn">Create plan</button><button data-close>Cancel</button></div>`,
+  const srcOpts = uxCashAccounts().map(a => `<option value="acc:${esc(a.id)}">${esc(a.name)} (${money(a.balance)})</option>`).join('') + state.cards.map(c => `<option value="card:${esc(c.id)}">💳 ${esc(c.name)}</option>`).join('');
+  uxSheet(`<h3>🛒 New pay-later plan</h3><div class="lf"><label>What did you buy?</label><input id="pl-name" placeholder="e.g. iPhone or Shopping vouchers"></div><label class="vchk"><input type="checkbox" id="pl-voucher"> 🎟️ This is a voucher / prepaid balance (I will spend it later)</label><div class="lf pl-item"><label>Category</label><select id="pl-cat">${cats.map(c => `<option value="${esc(c)}">${catIcon(c)} ${esc(c)}</option>`).join('')}</select></div><div class="lf pl-item"><label>Subcategory</label><select id="pl-sub"></select></div><div class="lf"><label>Price (QR)</label><input id="pl-price" type="number" inputmode="decimal" step="0.01" min="0" placeholder="5000"></div><div class="lf pl-item"><label>Extra fee / interest (optional)</label><input id="pl-fee" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0"></div><div class="lf"><label>Installments after the first payment</label><div class="chips">${[4, 6, 8, 12].map(n => `<button type="button" class="chip ${n === 4 ? 'on' : ''}" data-n="${n}">${n}</button>`).join('')}<input id="pl-n" class="n-input" type="number" inputmode="numeric" min="1" max="60" value="4"></div></div><div class="lf"><label>Pay now (first payment)</label><input id="pl-down" type="number" inputmode="decimal" step="0.01" min="0" placeholder="0"><div class="chips"><button type="button" class="chip" data-equal="1">Equal share</button></div></div><div class="lf"><label>Next installment due</label><input id="pl-start" type="date" value="${uxAddMonths(today(), 1)}"></div><div class="lf"><label>Pay from</label><select id="pl-src">${srcOpts}</select></div><div class="pl-preview" id="pl-prev">Enter the price to see the plan.</div><div class="sheet-btns"><button data-save="1" class="save-btn">Create plan</button><button data-close>Cancel</button></div>`,
     async (e, close) => {
       const chip = e.target.closest('[data-n]'); if (chip) { $('pl-n').value = chip.dataset.n; recalc(); return; }
       if (e.target.closest('[data-equal]')) { manual = false; recalc(); return; }
@@ -1278,28 +1286,31 @@ function uxPlanForm() {
       if (!(v.n >= 1 && v.n <= 60)) return toast('Installments must be between 1 and 60.', 'error');
       if (v.down < 0 || v.down >= v.total) return toast('Pay-now must be less than the total of ' + money(v.total) + '.', 'error');
       if (!$('pl-src').value) return toast('Choose where to pay from.', 'error');
-      const plan = { v: 1, id: uid(), name, category: $('pl-cat').value, subcategory: $('pl-sub').value, price: v.price, fee: v.fee, total: v.total, down: v.down, n: v.n, start: $('pl-start').value || uxAddMonths(today(), 1), date: today(), src: $('pl-src').value };
+      const vch = $('pl-voucher').checked, plan = { v: 1, id: uid(), name, voucher: vch, category: vch ? 'Voucher Payment' : $('pl-cat').value, subcategory: vch ? name : $('pl-sub').value, price: v.price, fee: v.fee, total: v.total, down: v.down, n: v.n, start: $('pl-start').value || uxAddMonths(today(), 1), date: today(), src: $('pl-src').value };
       const row = { id: uid(), category: '__plan|' + plan.id, amount: plan.total, period: JSON.stringify(plan), userId: String(state.user?.id || '') };
-      close(); state.budgets.push(row);
+      close(); let vacc = null;
+      if (vch) { vacc = { id: uid(), name, type: 'voucher', owner: String(state.user?.id || ''), balance: plan.price, currency: 'QAR' }; plan.accId = vacc.id; row.period = JSON.stringify(plan); state.accounts.push(normalizeAccount(vacc)); }
+      state.budgets.push(row);
       const tx = plan.down > 0 ? uxPlanTx(plan, 0, plan.down, plan.date, plan.src) : null;
       if (tx) { state.transactions.unshift(normalizeTx({ ...tx, userId: state.user?.id })); uxApply('expense', tx.amount, tx.accountId, tx.cardId, 1); }
-      renderAll(); toast('Plan created ✓ ' + money(plan.total - plan.down) + ' left to pay', 'success');
-      try { await api('saveBudget', { data: { id: row.id, category: row.category, amount: row.amount, period: row.period } }); if (tx) await api('addTx', { data: tx }); }
+      renderAll(); toast(vch ? 'Voucher added ✓ ' + money(plan.price) + ' to spend · ' + money(plan.total - plan.down) + ' left to pay' : 'Plan created ✓ ' + money(plan.total - plan.down) + ' left to pay', 'success');
+      try { if (vacc) await api('addAccount', { data: vacc }); await api('saveBudget', { data: { id: row.id, category: row.category, amount: row.amount, period: row.period } }); if (tx) await api('addTx', { data: tx }); }
       catch (err) { toast('Not saved: ' + err.message, 'error'); }
       uxSync();
     });
   let manual = false;
-  const vals = () => { const price = r2($('pl-price').value), fee = r2($('pl-fee').value), n = Math.round(num($('pl-n').value)), total = r2(price + fee); return { price, fee, n, total, down: r2($('pl-down').value) }; };
+  const vals = () => { const price = r2($('pl-price').value), fee = $('pl-voucher').checked ? 0 : r2($('pl-fee').value), n = Math.round(num($('pl-n').value)), total = r2(price + fee); return { price, fee, n, total, down: r2($('pl-down').value) }; };
   const subs = () => { const c = $('pl-cat').value, l = subsFor(c); $('pl-sub').innerHTML = '<option value="">— none —</option>' + l.map(s => `<option value="${esc(s.name)}">${s.icon} ${esc(s.name)}</option>`).join(''); const g = l.find(s => /gadget|mobile|electronic/i.test(s.name)); if (g && /shop|tech/i.test(c)) $('pl-sub').value = g.name; };
   const recalc = () => {
     const v = vals(); document.querySelectorAll('[data-n]').forEach(b => b.classList.toggle('on', +b.dataset.n === v.n));
     if (!manual && v.n >= 1) $('pl-down').value = v.total > 0 ? r2(v.total / (v.n + 1)).toFixed(2) : '';
     const d = r2($('pl-down').value), rest = r2(v.total - d), per = v.n >= 1 ? rest / v.n : 0;
-    $('pl-prev').textContent = v.total > 0 && v.n >= 1 ? `Total ${money(v.total)} · pay now ${money(d)} · then ${v.n} × ${money(per)} monthly from ${rpFmt($('pl-start').value || today())}` : 'Enter the price to see the plan.';
+    $('pl-prev').textContent = v.total > 0 && v.n >= 1 ? `Total ${money(v.total)} · pay now ${money(d)} · then ${v.n} × ${money(per)} monthly from ${rpFmt($('pl-start').value || today())}${$('pl-voucher').checked ? ' · you get ' + money(v.price) + ' voucher balance to spend' : ''}` : 'Enter the price to see the plan.';
   };
   $('pl-cat').value = defCat; $('pl-cat').onchange = subs; subs();
   ['pl-price', 'pl-fee', 'pl-n', 'pl-start'].forEach(i => $(i).addEventListener('input', recalc));
   $('pl-down').addEventListener('input', () => { manual = true; recalc(); });
+  $('pl-voucher').addEventListener('change', () => { document.querySelectorAll('#sheet .pl-item').forEach(el => { el.style.display = $('pl-voucher').checked ? 'none' : ''; }); recalc(); });
   recalc();
 }
 document.addEventListener('click', e => {
@@ -1345,7 +1356,7 @@ function renderHistory() {
   const txs = type === 'payment' ? [] : state.transactions.slice().reverse().filter(t => (type === 'all' || t.type === type) && inRange(String(t.date).slice(0, 10)) && (!cSel.value || t.category === cSel.value) && (!q || [t.category, t.subcategory, t.product, t.note, t.date].join(' ').toLowerCase().includes(q)));
   const pl = (type === 'all' || type === 'payment') && !cSel.value ? pays.slice().reverse().filter(p => inRange(p.date) && (!q || [p.cardName, p.accName, p.note, p.date, 'card payment'].join(' ').toLowerCase().includes(q))) : [];
   const items = [...txs.map(t => ({ t, d: String(t.date).slice(0, 10) })), ...pl.map(p => ({ p, d: p.date }))].sort((a, b) => b.d.localeCompare(a.d));
-  const sum = ty => txs.filter(t => t.type === ty && !isLoanTx(t)).reduce((s, t) => s + t.amount, 0), paid = pl.reduce((s, p) => s + p.amount, 0);
+  const sum = ty => txs.filter(t => t.type === ty && !isLoanTx(t) && !isVoucherPay(t)).reduce((s, t) => s + t.amount, 0), paid = pl.reduce((s, p) => s + p.amount, 0);
   let html = `<div class="hist-sum"><span>${items.length} entries</span>${type === 'payment' ? '' : `<span class="pos">+${money(sum('income'))}</span><span class="neg">−${money(sum('expense'))}</span>`}${paid > 0 ? `<span class="paysum">💳 ${money(paid)}</span>` : ''}</div>`, last = '';
   items.slice(0, HS.limit).forEach(it => { if (it.d !== last) { html += `<div class="day-head">${uxDay(it.d)}</div>`; last = it.d; } html += it.t ? txRow(it.t) : uxPayRow(it.p); });
   if (items.length > HS.limit) html += `<button class="secondary wide" data-more="1">Show more (${items.length - HS.limit} left)</button>`;
@@ -1359,3 +1370,68 @@ function exportCsv() {
   a.href = url; a.download = 'jamshi-transactions.csv'; a.click(); URL.revokeObjectURL(url);
 }
 document.addEventListener('click', e => { const b = e.target.closest('[data-view-pay]'); if (b) uxPayDetail(b.dataset.viewPay); });
+
+
+/* ===== Voucher balance (prepaid, spend later; paying it off is not an expense) ===== */
+function uxIsVoucherAcc(a) { return String((a && a.type) || '').toLowerCase() === 'voucher'; }
+function uxIsVoucherAccId(id) { const a = state.accounts.find(x => x.id === String(id)); return !!a && uxIsVoucherAcc(a); }
+function isVoucherPay(t) { return t.category === 'Voucher Payment'; }
+function uxCash() { return state.accounts.filter(a => !uxIsVoucherAcc(a)).reduce((s, a) => s + num(a.balance), 0); }
+function uxVoucherTotal() { return state.accounts.filter(uxIsVoucherAcc).reduce((s, a) => s + Math.max(0, num(a.balance)), 0); }
+function uxCashAccounts() { return state.accounts.filter(a => !uxIsVoucherAcc(a)); }
+function uxRebuildTxAccount() {
+  const sel = $('tx-account'), m = $('tx-method').value, cur = sel.value;
+  const list = state.accounts.filter(a => m === 'voucher' ? uxIsVoucherAcc(a) : !uxIsVoucherAcc(a));
+  sel.innerHTML = list.map(a => `<option value="${esc(a.id)}">${uxIsVoucherAcc(a) ? '🎟️ ' : ''}${esc(a.name)} (${money(a.balance)})</option>`).join('');
+  if (list.some(a => a.id === cur)) sel.value = cur;
+}
+function sourceFields() {
+  const card = $('tx-method').value === 'card';
+  $('tx-account-wrap').classList.toggle('hidden', card); $('tx-card-wrap').classList.toggle('hidden', !card);
+  $('fuel-extra').classList.toggle('hidden', $('tx-category').value.toLowerCase() !== 'fuel');
+  uxRebuildTxAccount();
+}
+function uxMethodOptions(force) {
+  const sel = $('tx-method'); if (!sel) return;
+  const has = sel.querySelector('option[value="voucher"]'), editing = $('tx-edit-id') && $('tx-edit-id').value && sel.value === 'voucher';
+  const need = force || editing || state.accounts.some(a => uxIsVoucherAcc(a) && num(a.balance) > 0.005);
+  if (need && !has) sel.insertAdjacentHTML('beforeend', '<option value="voucher">🎟️ Voucher balance</option>');
+  if (!need && has) { if (sel.value === 'voucher') { sel.value = 'account'; sourceFields(); } has.remove(); }
+}
+function uxVoucherInfo(a) {
+  const spentTx = state.transactions.filter(t => t.type === 'expense' && t.accountId === a.id).sort((x, y) => String(y.date).localeCompare(String(x.date)));
+  const spent = spentTx.reduce((s, t) => s + t.amount, 0), plan = uxPlans().find(p => p.accId === a.id), balance = Math.max(0, num(a.balance));
+  return { a, spentTx, spent, plan, balance, face: plan ? plan.price : balance + spent };
+}
+function renderVouchers() {
+  let box = $('vouchers-box');
+  if (!box) {
+    box = document.createElement('div'); box.id = 'vouchers-box';
+    const anchor = $('installments-box') || $('payments-box') || $('loans-box'); if (anchor) $('view-accounts').insertBefore(box, anchor); else $('view-accounts').appendChild(box);
+    box.addEventListener('click', e => { const r = e.target.closest('[data-voucher]'); if (r) uxVoucherDetail(r.dataset.voucher); });
+  }
+  const vs = state.accounts.filter(uxIsVoucherAcc).map(uxVoucherInfo);
+  if (!vs.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `<div class="section-heading"><h2>🎟️ Vouchers</h2><span>${money(vs.reduce((s, v) => s + v.balance, 0))} to spend</span></div><section class="panel">${vs.map(v => { const pct = v.face > 0 ? Math.min(100, v.spent / v.face * 100) : 0, owe = v.plan && !v.plan.done ? ' · ' + money(v.plan.remaining) + ' still to pay' : ''; return `<div class="account-row plan-row" data-voucher="${esc(v.a.id)}"><div class="plan-main"><b>🎟️ ${esc(v.a.name)}</b><small>Value ${money(v.face)} · used ${money(v.spent)}${owe}</small><div class="bar"><i style="width:${pct.toFixed(0)}%"></i></div></div><div class="plan-amt"><strong class="pos">${money(v.balance)}</strong><small>available</small></div></div>`; }).join('')}</section>`;
+}
+function uxVoucherDetail(id) {
+  const a = state.accounts.find(x => x.id === id); if (!a) return;
+  const v = uxVoucherInfo(a), plan = v.plan;
+  const hist = v.spentTx.slice(0, 12).map(t => `<div class="lh"><span>${catIcon(t.category)} ${esc(t.category)}${t.subcategory ? ' · ' + esc(t.subcategory) : ''}<small>${esc(String(t.date).slice(0, 10))}${t.product || t.note ? ' · ' + esc(t.product || t.note) : ''}</small></span><b class="neg">−${money(t.amount)}</b></div>`).join('') || '<p class="empty">Nothing spent from this voucher yet.</p>';
+  uxSheet(`<div class="sheet-ic">🎟️</div><h3>${esc(a.name)}</h3><div class="sheet-amt income">${money(v.balance)}</div><p>available to spend<br>Value ${money(v.face)} · used ${money(v.spent)}${plan ? '<br>' + (plan.done ? 'Fully paid ✓' : money(plan.remaining) + ' still to pay (' + plan.paidCount + ' of ' + plan.count + ' paid)') : ''}</p><div class="sheet-btns"><button data-do="spend">🛍️ Spend voucher</button>${plan && !plan.done ? `<button data-do="pay">💸 Pay ${money(Math.min(plan.next.amount, plan.remaining))}</button>` : ''}<button data-close>Close</button></div><h4 class="mini-title">Spent from this voucher</h4>${hist}`,
+    (e, close) => { const d = e.target.closest('[data-do]')?.dataset.do; if (d === 'spend') { close(); uxSpendVoucher(id); } if (d === 'pay') { close(); uxInstPay(plan.id); } });
+}
+function uxSpendVoucher(id) {
+  uxMethodOptions(true); resetTxForm(); $('tx-method').value = 'voucher'; sourceFields(); $('tx-account').value = id; switchView('add');
+}
+function uxHeroInst() {
+  const hs = document.querySelector('.hero-stats'); if (!hs) return;
+  const mk = (id, html, show) => { let el = $(id); if (!el) { el = document.createElement('span'); el.id = id; hs.appendChild(el); } el.style.display = show ? '' : 'none'; el.innerHTML = html; };
+  const r = uxInstRemaining(), vt = uxVoucherTotal();
+  mk('inst-stat', `Pay-later due <b>${money(r)}</b>`, r > 0.005);
+  mk('voucher-stat', `Vouchers <b>${money(vt)}</b>`, vt > 0.005);
+}
+function uxVoucherSectionHTML(D) {
+  if (!D.vouchers.length) return '';
+  return `<h2 class="rp-sec">🎟️ Voucher balance</h2><table class="rp-t"><thead><tr><th>Voucher</th><th class="n">Spent</th><th class="n">Paid for it</th><th class="n">Balance</th><th class="n">To pay</th></tr></thead><tbody>${D.vouchers.map(v => `<tr><td>🎟️ ${esc(v.acc.name)}</td><td class="n">${money(v.spent)}</td><td class="n">${money(v.paidIn)}</td><td class="n pos-t">${money(Math.max(0, num(v.acc.balance)))}</td><td class="n ${v.plan && !v.plan.done ? 'neg-t' : ''}">${money(v.plan ? v.plan.remaining : 0)}</td></tr>`).join('')}</tbody></table><p class="rp-note">Things bought with a voucher are counted in the expense categories above. Money paid to settle a voucher is not counted as an expense, so nothing is counted twice.</p>`;
+}

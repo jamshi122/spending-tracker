@@ -174,3 +174,6 @@ body.dark .pl-preview{background:#16304f;border-color:#2b4d7b;color:#bcd8ff}
 .pay-row .tx-icon{background:#e3eeff}
 body.dark .pay-row .tx-icon{background:#1f3a60}
 .hist-sum .paysum{color:var(--blue)}
+.vchk{display:flex;align-items:flex-start;gap:10px;background:#f1f7ff;border:1px solid #d7e6ff;border-radius:12px;padding:12px;margin-bottom:12px;font-size:13px;font-weight:600;text-align:left;line-height:1.4}
+.vchk input{margin-top:2px;flex:none}
+body.dark .vchk{background:#16304f;border-color:#2b4d7b}
